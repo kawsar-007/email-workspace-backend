@@ -1,131 +1,105 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const path = require('path');
-const { faker } = require('@faker-js/faker');
-require('dotenv').config();
+import express from 'express';
+import mongoose from 'mongoose';
+import { faker } from '@faker-js/faker';
+import validate from 'deep-email-validator';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-
-// Middleware
-app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static('public'));
 
-// MongoDB Connection
-const MONGO_URI = process.env.MONGO_URI;
+// MongoDB Atlas Connection (আপনার মঙ্গোডিবি ইউআরএল বসাবেন)
+const MONGO_URI = process.env.MONGO_URI || 'YOUR_MONGODB_CONNECTION_STRING';
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('MongoDB Connected Successfully'))
-  .catch((err) => console.error('MongoDB Connection Error:', err));
+    .then(() => console.log('MongoDB Connected'))
+    .catch(err => console.error('MongoDB Connection Error:', err));
 
-// Database Schema & Model
+// Database Schema Setup
 const emailSchema = new mongoose.Schema({
-  email: { type: String, required: true, unique: true },
-  deviceId: { type: String, default: null },
-  assignedAt: { type: Date, default: null },
-  isAssigned: { type: Boolean, default: false }
+    email: { type: String, unique: true, required: true },
+    isUsed: { type: Boolean, default: false },
+    deviceId: { type: String, default: null },
+    createdAt: { type: Date, default: Date.now }
 });
-
 const Email = mongoose.model('Email', emailSchema);
 
-// Supported Domains
-const DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'];
+// Helper Function: Live SMTP Validation
+async function checkEmailValidity(email) {
+    try {
+        const res = await validate({
+            email: email,
+            validateRegex: true,
+            validateMx: true,
+            validateTypo: false,
+            validateDisposable: false,
+            validateSMTP: true // লাইভ ইনবক্স চেক করবে
+        });
+        return res.valid;
+    } catch (error) {
+        return false;
+    }
+}
 
-// --- API ENDPOINTS ---
-
-// 1. Get Available Domains
-app.get('/api/domains', (req, res) => {
-  res.json({ success: true, domains: DOMAINS });
-});
-
-// 2. Generate Emails (Background Generation using Faker.js)
+// 1. Route: SMTP ভ্যালিডেশন করে ইমেইল জেনারেট ও সেভ করা
 app.post('/api/generate-emails', async (req, res) => {
-  try {
-    const { count = 100, domain } = req.body;
-    const generateCount = parseInt(count, 10);
+    try {
+        const { count = 5, domain } = req.body;
+        const verifiedEmails = [];
+        let attempts = 0;
+        const maxAttempts = count * 8; // Safety limit
 
-    // Run background insertion asynchronously
-    (async () => {
-      const emailDocs = [];
-      for (let i = 0; i < generateCount; i++) {
-        const firstName = faker.person.firstName().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const lastName = faker.person.lastName().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const randomNumber = faker.number.int({ min: 10, max: 9999 });
-        
-        const selectedDomain = domain && DOMAINS.includes(domain) 
-          ? domain 
-          : DOMAINS[Math.floor(Math.random() * DOMAINS.length)];
+        while (verifiedEmails.length < count && attempts < maxAttempts) {
+            attempts++;
+            const firstName = faker.person.firstName().toLowerCase().replace(/[^a-z0-9]/g, '');
+            const lastName = faker.person.lastName().toLowerCase().replace(/[^a-z0-9]/g, '');
+            const selectedDomain = domain || 'gmail.com';
+            const candidateEmail = `${firstName}.${lastName}${Math.floor(Math.random() * 899 + 100)}@${selectedDomain}`;
 
-        const generatedEmail = `${firstName}${lastName}${randomNumber}@${selectedDomain}`;
-        emailDocs.push({ email: generatedEmail });
-      }
+            // ডাটাবেজে আগে থেকে আছে কি না চেক
+            const exists = await Email.findOne({ email: candidateEmail });
+            if (exists) continue;
 
-      try {
-        await Email.insertMany(emailDocs, { ordered: false });
-      } catch (err) {
-        // Ignore duplicate key errors if generated email collides
-      }
-    })();
+            // SMTP Handshake Verification
+            const isValid = await checkEmailValidity(candidateEmail);
+            if (isValid) {
+                verifiedEmails.push({ email: candidateEmail, isUsed: false });
+            }
+        }
 
-    res.json({
-      success: true,
-      message: `Background email generation started for ${generateCount} records.`
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
+        if (verifiedEmails.length > 0) {
+            await Email.insertMany(verifiedEmails, { ordered: false }).catch(() => {});
+        }
+
+        res.json({
+            success: true,
+            message: `${verifiedEmails.length}টি লাইভ সচল ইমেইল ডাটাবেজে সেভ করা হয়েছে!`
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: "ইমেইল জেনারেট করতে সমস্যা হয়েছে।" });
+    }
 });
 
-// 3. Assign 1:1 Unique Email for a Device (Atomic Logic)
+// 2. Route: একই ডিভাইসকে প্রতিবার নতুন (Unused) ইমেইল দেওয়া
 app.post('/api/get-device-email', async (req, res) => {
-  try {
-    const { deviceId } = req.body;
+    try {
+        const { deviceId } = req.body;
+        if (!deviceId) return res.status(400).json({ success: false, error: "Device ID প্রয়োজন।" });
 
-    if (!deviceId) {
-      return res.status(400).json({ success: false, error: 'Device ID is required.' });
+        // সরাসরি পরবর্তী unused (isUsed: false) ইমেইলটি নিয়ে Lock করবে
+        const assignedDoc = await Email.findOneAndUpdate(
+            { isUsed: false },
+            { $set: { isUsed: true, deviceId: deviceId } },
+            { new: true, sort: { createdAt: 1 } }
+        );
+
+        if (assignedDoc) {
+            res.json({ success: true, email: assignedDoc.email });
+        } else {
+            res.status(404).json({ success: false, error: "ডাটাবেজে কোনো খালি ভ্যালিড ইমেইল নেই! নতুন ইমেইল জেনারেট করুন।" });
+        }
+    } catch (err) {
+        res.status(500).json({ success: false, error: "সার্ভার অভ্যন্তরীণ ত্রুটি।" });
     }
-
-    // Check if device already has an assigned email
-    let existingAssignment = await Email.findOne({ deviceId });
-    if (existingAssignment) {
-      return res.json({
-        success: true,
-        email: existingAssignment.email,
-        message: 'Retrieved existing assigned email for this device.'
-      });
-    }
-
-    // Atomically find an unassigned email and map it to this device
-    const assignedEmail = await Email.findOneAndUpdate(
-      { isAssigned: false },
-      { $set: { deviceId, isAssigned: true, assignedAt: new Date() } },
-      { new: true }
-    );
-
-    if (!assignedEmail) {
-      return res.status(404).json({
-        success: false,
-        error: 'No unassigned emails available in pool. Please generate more.'
-      });
-    }
-
-    res.json({
-      success: true,
-      email: assignedEmail.email,
-      message: 'New unique email assigned successfully.'
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
 });
 
-// Express v5 Compatible Wildcard Route (Fixes PathError)
-app.get('/{*splat}', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Start Server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

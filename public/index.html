@@ -3,158 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Management Dashboard</title>
+    <title>Email Distribution System</title>
     <style>
-        body { font-family: Arial, sans-serif; background: #f4f6f9; padding: 20px; }
-        .card { max-width: 600px; margin: 20px auto; padding: 25px; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; color: #333; }
-        .section { margin-bottom: 25px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input, select { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
-        button:hover { background: #0056b3; }
-        .result { margin-top: 15px; padding: 10px; border-radius: 4px; font-weight: bold; display: none; }
-        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        body { font-family: Arial, sans-serif; background: #f4f6f9; padding: 20px; text-align: center; }
+        .card { background: white; max-width: 500px; margin: 20px auto; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        input, select, button { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        button { background: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
+        button:hover { background: #218838; }
+        .btn-get { background: #007bff; }
+        .btn-get:hover { background: #0056b3; }
+        .result { margin-top: 15px; padding: 10px; border-radius: 5px; font-weight: bold; word-break: break-all; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #e2e3e5; color: #383d41; }
     </style>
-    <!-- FingerprintJS CDN for Automatic Device ID Generation -->
-    <script src="https://openfpcdn.io/fingerprintjs/v3/umd.min.js"></script>
 </head>
 <body>
 
-<div class="card">
-    <h2>Email Management Dashboard</h2>
-
-    <!-- 1. Generate Emails -->
-    <div class="section">
-        <h3>১. ইমেইল জেনারেট করুন</h3>
-        <label>সংখ্যা:</label>
-        <input type="number" id="genCount" value="100" placeholder="eg: 100">
-        
-        <label>ডোমেইন সিলেক্ট করুন:</label>
-        <select id="genDomainSelect" onchange="toggleCustomDomain(this.value)">
-            <option value="">Random Domains (সব ধরনের)</option>
+    <!-- Email Generation Panel -->
+    <div class="card">
+        <h3>১. নতুন ভ্যালিড ইমেইল তৈরি করুন</h3>
+        <input type="number" id="genCount" value="3" min="1" max="10" placeholder="কতটি ইমেইল চান?">
+        <select id="genDomainSelect" onchange="toggleCustomDomain()">
             <option value="gmail.com">gmail.com</option>
             <option value="yahoo.com">yahoo.com</option>
             <option value="outlook.com">outlook.com</option>
-            <option value="hotmail.com">hotmail.com</option>
-            <option value="icloud.com">icloud.com</option>
-            <option value="aol.com">aol.com</option>
-            <option value="proton.me">proton.me</option>
-            <option value="zoho.com">zoho.com</option>
-            <option value="gmx.com">gmx.com</option>
-            <option value="mail.com">mail.com</option>
-            <option value="custom">-- কাস্টম ডোমেইন টাইপ করুন --</option>
+            <option value="custom">Custom Domain</option>
         </select>
-
-        <div id="customDomainGroup" style="display: none;">
-            <label>নিজের ইচ্ছেমতো ডোমেইন লিখুন (যেমন: mydomain.com):</label>
-            <input type="text" id="genDomainCustom" placeholder="eg: customdomain.com">
-        </div>
-        
-        <button onclick="generateEmails()">জেনারেট শুরু করুন</button>
-        <div id="genStatus" class="result"></div>
+        <input type="text" id="genDomainCustom" placeholder="customdomain.com" style="display:none;">
+        <button onclick="generateEmails()">SMTP চেক করে ইমেইল তৈরি করুন</button>
+        <div id="genStatus" class="result" style="display:none;"></div>
     </div>
 
-    <!-- 2. Get Device Email -->
-    <div class="section">
-        <h3>২. ডিভাইসের জন্য ইউনিক ইমেইল তুলুন</h3>
-        <label>Auto-Detected Device Hardware ID (Fingerprint):</label>
-        <input type="text" id="deviceId" placeholder="ডিভাইস আইডি লোড হচ্ছে..." readonly style="background: #e9ecef;">
-        
-        <button onclick="getDeviceEmail()">ইমেইল নিন</button>
-        <div id="deviceResult" class="result"></div>
+    <!-- Get New Email Panel -->
+    <div class="card">
+        <h3>২. ডিভাইসের জন্য ইমেইল সংগ্রহ করুন</h3>
+        <div class="result info">Device ID: <span id="displayDeviceId">লোডিং...</span></div>
+        <button class="btn-get" onclick="getDeviceEmail()">নতুন ইমেইল নিন</button>
+        <div id="getEmailStatus" class="result" style="display:none;"></div>
     </div>
-</div>
 
-<script>
-    // Show/hide custom domain input
-    function toggleCustomDomain(val) {
-        const customInput = document.getElementById('customDomainGroup');
-        if (val === 'custom') {
-            customInput.style.display = 'block';
-        } else {
-            customInput.style.display = 'none';
-        }
-    }
-
-    // 1. Auto detect browser fingerprint on page load
-    const fpPromise = FingerprintJS.load();
-    fpPromise
-      .then(fp => fp.get())
-      .then(result => {
-        const visitorId = result.visitorId;
-        document.getElementById('deviceId').value = visitorId;
-      })
-      .catch(err => {
-        console.error("Fingerprint Error:", err);
-        document.getElementById('deviceId').value = 'DEV_' + Math.random().toString(36).substring(2, 9);
-      });
-
-    // 2. Background Email Generator Call
-    async function generateEmails() {
-        const count = document.getElementById('genCount').value || 100;
-        const domainSelect = document.getElementById('genDomainSelect').value;
-        let domain = domainSelect;
-
-        if (domainSelect === 'custom') {
-            domain = document.getElementById('genDomainCustom').value.trim();
-        }
-
-        const statusDiv = document.getElementById('genStatus');
-
-        statusDiv.style.display = 'block';
-        statusDiv.className = 'result success';
-        statusDiv.innerText = 'জেনারেট অনুরোধ পাঠানো হচ্ছে...';
-
-        try {
-            const res = await fetch('/api/generate-emails', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ count: parseInt(count), domain })
-            });
-            const data = await res.json();
-            statusDiv.innerText = data.message || 'জেনারেট সফল হয়েছে!';
-        } catch (err) {
-            statusDiv.className = 'result error';
-            statusDiv.innerText = 'ইমেইল জেনারেট করতে সমস্যা হয়েছে।';
-        }
-    }
-
-    // 3. Get Email Assigned to Device
-    async function getDeviceEmail() {
-        const deviceId = document.getElementById('deviceId').value;
-        const resultDiv = document.getElementById('deviceResult');
-
-        if (!deviceId) {
-            alert('ডিভাইস আইডি পাওয়া যায়নি! দয়া করে পেজটি রিফ্রেশ করুন।');
-            return;
-        }
-
-        resultDiv.style.display = 'block';
-        resultDiv.className = 'result success';
-        resultDiv.innerText = 'ইমেইল চেক করা হচ্ছে...';
-
-        try {
-            const res = await fetch('/api/get-device-email', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId })
-            });
-            const data = await res.json();
-            
-            if(data.success) {
-                resultDiv.innerText = `অ্যাসাইন করা ইমেইল: ${data.email}`;
-            } else {
-                resultDiv.className = 'result error';
-                resultDiv.innerText = data.error || 'কোনো ইমেইল পাওয়া যায়নি।';
+    <script>
+        // Unique Hardware Device Identifier (Local Fallback Included)
+        function getDeviceId() {
+            let id = localStorage.getItem('app_device_id');
+            if (!id) {
+                id = 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase() + '-' + Date.now();
+                localStorage.setItem('app_device_id', id);
             }
-        } catch (err) {
-            resultDiv.className = 'result error';
-            resultDiv.innerText = 'সার্ভার থেকে ইমেইল আনা সম্ভব হয়নি।';
+            return id;
         }
-    }
-</script>
 
+        document.getElementById('displayDeviceId').innerText = getDeviceId();
+
+        function toggleCustomDomain() {
+            const select = document.getElementById('genDomainSelect').value;
+            document.getElementById('genDomainCustom').style.display = (select === 'custom') ? 'block' : 'none';
+        }
+
+        async function generateEmails() {
+            const count = document.getElementById('genCount').value || 3;
+            const domainSelect = document.getElementById('genDomainSelect').value;
+            const domain = (domainSelect === 'custom') ? document.getElementById('genDomainCustom').value.trim() : domainSelect;
+            const statusDiv = document.getElementById('genStatus');
+
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'result info';
+            statusDiv.innerText = 'লাইভ SMTP ভ্যালিডিটি চেক করা হচ্ছে... একটু অপেক্ষা করুন।';
+
+            try {
+                const res = await fetch('/api/generate-emails', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ count: parseInt(count), domain })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    statusDiv.className = 'result success';
+                    statusDiv.innerText = data.message;
+                } else {
+                    statusDiv.className = 'result error';
+                    statusDiv.innerText = data.error || 'ইমেইল ফিল্টার করতে সমস্যা হয়েছে।';
+                }
+            } catch (err) {
+                statusDiv.className = 'result error';
+                statusDiv.innerText = 'সার্ভারের সাথে সংযোগ স্থাপন করা সম্ভব হয়নি।';
+            }
+        }
+
+        async function getDeviceEmail() {
+            const deviceId = getDeviceId();
+            const statusDiv = document.getElementById('getEmailStatus');
+
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'result info';
+            statusDiv.innerText = 'নতুন ইমেইল লোড হচ্ছে...';
+
+            try {
+                const res = await fetch('/api/get-device-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deviceId })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    statusDiv.className = 'result success';
+                    statusDiv.innerText = `আপনার নতুন ইমেইল: ${data.email}`;
+                } else {
+                    statusDiv.className = 'result error';
+                    statusDiv.innerText = data.error;
+                }
+            } catch (err) {
+                statusDiv.className = 'result error';
+                statusDiv.innerText = 'সার্ভার এরর। চেষ্টা আবার করুন।';
+            }
+        }
+    </script>
 </body>
 </html>
