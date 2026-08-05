@@ -6,7 +6,7 @@
     <title>Email Generator & Device Manager</title>
     <style>
         body { font-family: Arial, sans-serif; background: #f0f2f5; display: flex; justify-content: center; padding: 40px; }
-        .card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 400px; margin-bottom: 20px; }
+        .card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 420px; margin-bottom: 20px; }
         input, select, button { width: 100%; padding: 12px; margin-top: 10px; border-radius: 6px; border: 1px solid #ccc; box-sizing: border-box; }
         button { cursor: pointer; font-weight: bold; }
         .btn-green { background: #138852; color: white; border: none; }
@@ -24,10 +24,28 @@
             <h3>1. Generate Valid Emails</h3>
             <input type="number" id="count" value="3" min="1" max="50">
             <select id="domain">
-                <option value="all">All Domains</option>
+                <option value="all">All Domains (21 Domains Randomly)</option>
                 <option value="gmail.com">gmail.com</option>
                 <option value="yahoo.com">yahoo.com</option>
                 <option value="outlook.com">outlook.com</option>
+                <option value="hotmail.com">hotmail.com</option>
+                <option value="icloud.com">icloud.com</option>
+                <option value="aol.com">aol.com</option>
+                <option value="zoho.com">zoho.com</option>
+                <option value="proton.me">proton.me</option>
+                <option value="mail.com">mail.com</option>
+                <option value="gmx.com">gmx.com</option>
+                <option value="yandex.com">yandex.com</option>
+                <option value="live.com">live.com</option>
+                <option value="msn.com">msn.com</option>
+                <option value="comcast.net">comcast.net</option>
+                <option value="sbcglobal.net">sbcglobal.net</option>
+                <option value="verizon.net">verizon.net</option>
+                <option value="att.net">att.net</option>
+                <option value="me.com">me.com</option>
+                <option value="mac.com">mac.com</option>
+                <option value="rocketmail.com">rocketmail.com</option>
+                <option value="cox.net">cox.net</option>
             </select>
             <button class="btn-green" onclick="generateEmails()">Generate Emails</button>
             <div id="genStatus" class="status"></div>
@@ -43,7 +61,6 @@
     </div>
 
     <script>
-        // Set fixed device ID or generate one
         let deviceId = localStorage.getItem('device_id');
         if (!deviceId) {
             deviceId = 'DEV-' + Math.random().toString(36).substring(2, 10).toUpperCase() + '-' + Date.now();

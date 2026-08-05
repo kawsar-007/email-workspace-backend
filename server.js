@@ -32,7 +32,7 @@ const emailSchema = new mongoose.Schema({
 
 const EmailModel = mongoose.model('Email', emailSchema);
 
-// Pre-validated Active Global Domains
+// Pre-validated 21 Active Global Domains
 const ALLOWED_DOMAINS = [
     'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 
     'aol.com', 'zoho.com', 'proton.me', 'mail.com', 'gmx.com', 
@@ -40,7 +40,7 @@ const ALLOWED_DOMAINS = [
     'verizon.net', 'att.net', 'me.com', 'mac.com', 'rocketmail.com', 'cox.net'
 ];
 
-// Helper Function: Check Domain MX Records (Active Email Server Verification)
+// Helper Function: Check Domain MX Records (Active Mail Exchange Verification)
 async function verifyDomainMX(domain) {
     try {
         const mxRecords = await dns.resolveMx(domain);
