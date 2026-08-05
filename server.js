@@ -1,198 +1,121 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const dotenv = require('dotenv');
 const cors = require('cors');
-const dns = require('dns').promises;
-const validator = require('email-validator');
 const path = require('path');
-
-dotenv.config();
+const { faker } = require('@faker-js/faker');
 
 const app = express();
-app.use(express.json());
 app.use(cors());
-
-// Web Dashboard Static Files
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Direct MongoDB Atlas Connection with Provided Credentials
-const mongoURI = "mongodb+srv://kawsarmahamud14_db_user:BZHFzP67WepBJEGF@cluster0.abcde.mongodb.net/EmailDB?retryWrites=true&w=majority";
+// Environment / Config Variables
+const PORT = process.env.PORT || 5000;
+const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://kawsarmahamud14_db_user:BZHFzP67WepBJEGF@cluster0.rtr3kmq.mongodb.net/emailDB?retryWrites=true&w=majority";
 
-mongoose.connect(process.env.MONGO_URI || mongoURI)
-  .then(() => console.log('MongoDB Database Connected Successfully'))
+// MongoDB Connection
+mongoose.connect(MONGO_URI)
+  .then(() => console.log('MongoDB Connected Successfully'))
   .catch(err => console.error('MongoDB Connection Error:', err));
 
-// Schema Definition
-const EmailSchema = new mongoose.Schema({
+// Email Schema
+const emailSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
-  isUsed: { type: Boolean, default: false },
-  usedByDevice: { type: String, default: null },
-  usedAt: { type: Date, default: null },
+  assigned: { type: Boolean, default: false },
+  deviceId: { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 
-const Email = mongoose.model('Email', EmailSchema);
+const Email = mongoose.model('Email', emailSchema);
 
-// Expanded First Name Pool (50+ Names)
-const firstNames = [
-  'john', 'alex', 'david', 'michael', 'james', 'robert', 'william', 'daniel', 'matthew', 'joseph', 
-  'samuel', 'anthony', 'andrew', 'ryan', 'brandon', 'jason', 'ethan', 'joshua', 'noah', 'logan', 
-  'lucas', 'jackson', 'benjamin', 'mason', 'oliver', 'jacob', 'elijah', 'liam', 'alexander', 'henry', 
-  'sebastian', 'jack', 'owen', 'theodore', 'wyatt', 'luke', 'julian', 'leo', 'jayden', 'gabriel', 
-  'dylan', 'grayson', 'levi', 'isaac', 'cameron', 'caleb', 'christian', 'hunter', 'aaron', 'charles'
-];
-
-// Expanded Last Name Pool (50+ Names)
-const lastNames = [
-  'smith', 'johnson', 'williams', 'brown', 'jones', 'miller', 'davis', 'garcia', 'rodriguez', 'wilson', 
-  'martinez', 'taylor', 'anderson', 'thomas', 'white', 'harris', 'martin', 'thompson', 'robinson', 'clark', 
-  'lewis', 'lee', 'walker', 'hall', 'allen', 'young', 'hernandez', 'king', 'wright', 'lopez', 
-  'hill', 'scott', 'green', 'adams', 'baker', 'gonzalez', 'nelson', 'carter', 'mitchell', 'perez', 
-  'roberts', 'turner', 'phillips', 'campbell', 'parker', 'evans', 'edwards', 'collins', 'stewart', 'morris'
-];
-
-// Full Domain Pool (Major, Regional & Free Webmail Providers)
+// ২১টি ডোমেইন প্রোভাইডার লিস্ট
 const defaultDomains = [
   'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com',
-  'live.com', 'msn.com', 'ymail.com', 'rocketmail.com',
-  'aol.com', 'protonmail.com', 'zoho.com', 'mail.com', 'gmx.com',
-  'gmx.de', 'web.de', 'mail.ru', 'yandex.com', 'cox.net', 'sbcglobal.net', 'comcast.net'
+  'aol.com', 'protonmail.com', 'zoho.com', 'gmx.com', 'mail.com',
+  'yandex.com', 'fastmail.com', 'hushmail.com', 'lycos.com', 'inbox.com',
+  'rediffmail.com', 'proton.me', 'live.com', 'msn.com', 'cox.net', 'sbcglobal.net'
 ];
 
-function getRandomElement(arr) {
+function getRandomItem(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Custom Email Pattern Generator
-function generateEmailPattern(customDomain) {
-  const fName = getRandomElement(firstNames);
-  const lName = getRandomElement(lastNames);
-  const randomNum = Math.floor(100 + Math.random() * 9900);
-  const domain = customDomain || getRandomElement(defaultDomains);
-
-  const formats = [
-    `${fName}.${lName}${randomNum}@${domain}`,
-    `${fName}${lName}${randomNum}@${domain}`,
-    `${fName}_${lName}${randomNum}@${domain}`,
-    `${lName}.${fName}${randomNum}@${domain}`,
-    `${fName}${randomNum}@${domain}`
-  ];
-
-  return getRandomElement(formats);
+// Faker.js ব্যবহার করে আনলিমিটেড ইউনিক ইমেইল জেনারেট করার ফাংশন
+function generateRandomEmail(customDomain) {
+  const fname = faker.person.firstName().toLowerCase().replace(/[^a-z]/g, '');
+  const lname = faker.person.lastName().toLowerCase().replace(/[^a-z]/g, '');
+  const num = faker.number.int({ min: 1000, max: 9999 });
+  const domain = customDomain || getRandomItem(defaultDomains);
+  
+  return `${fname}.${lname}${num}@${domain}`;
 }
 
-// MX Validation Helper Function
-async function validateMxRecord(email) {
-  try {
-    const domain = email.split('@')[1];
-    const addresses = await dns.resolveMx(domain);
-    return addresses && addresses.length > 0;
-  } catch (err) {
-    return false;
-  }
-}
+// 1. Fetch Domains
+app.get('/api/domains', (req, res) => {
+  res.json({ domains: defaultDomains });
+});
 
-// 1. Unlimited / Bulk Background Email Generator API (Validated)
+// 2. Generate Emails
 app.post('/api/emails/generate', async (req, res) => {
-  const { count = 0, domain } = req.body; // count = 0 means Unlimited
-
-  res.json({
-    success: true,
-    message: `Background email generation started for ${count === 0 ? 'unlimited' : count} records.`
-  });
-
-  (async () => {
+  try {
+    const { count = 1, domain } = req.body;
+    const limit = parseInt(count) || 1;
     let generatedCount = 0;
-    const target = count === 0 ? Infinity : count;
 
-    while (generatedCount < target) {
-      const email = generateEmailPattern(domain);
-
-      // Check Syntax & MX Record
-      if (validator.validate(email)) {
-        const isValidMx = await validateMxRecord(email);
-        if (isValidMx) {
-          try {
-            const newEmail = new Email({ email });
-            await newEmail.save();
-            generatedCount++;
-            
-            if (generatedCount % 10 === 0) {
-              console.log(`[Workspace Engine] Generated & saved ${generatedCount} validated emails.`);
-            }
-          } catch (err) {
-            // Skips duplicates automatically
-          }
-        }
+    for (let i = 0; i < limit; i++) {
+      const emailStr = generateRandomEmail(domain);
+      try {
+        await Email.create({ email: emailStr });
+        generatedCount++;
+      } catch (err) {
+        // Skip duplicate email errors if any overlap happens
       }
-      
-      // Prevent high CPU usage
-      await new Promise(resolve => setTimeout(resolve, 20));
-    }
-  })();
-});
-
-// 2. Manual Email Input & MX Validation API
-app.post('/api/emails/add', async (req, res) => {
-  const { email } = req.body;
-
-  if (!email || !validator.validate(email)) {
-    return res.status(400).json({ success: false, message: 'Invalid email format' });
-  }
-
-  try {
-    const isValidMx = await validateMxRecord(email);
-    if (!isValidMx) {
-      return res.status(400).json({ success: false, message: 'Domain MX record invalid' });
     }
 
-    const newEmail = new Email({ email });
-    await newEmail.save();
-    res.json({ success: true, message: 'Email validated and added', data: newEmail });
-  } catch (err) {
-    if (err.code === 11000) {
-      return res.status(400).json({ success: false, message: 'Email already exists in database' });
-    }
-    res.status(500).json({ success: false, message: 'Server or Domain validation error' });
+    res.json({ 
+      success: true, 
+      message: `${generatedCount} emails generated and saved successfully.`,
+      count: generatedCount 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// 3. Fetch Unused Email for Device (Ensures 1 Email -> 1 Device Only)
+// 3. Fetch Unused Email for Device (Atomic Operation)
 app.post('/api/emails/fetch-unused', async (req, res) => {
-  const { deviceId } = req.body;
-
-  if (!deviceId) {
-    return res.status(400).json({ success: false, message: 'Device ID is required' });
-  }
-
   try {
-    // Atomic Operation: Finds unassigned email and locks it instantly
+    const deviceId = req.body.deviceId || req.body.device_id;
+
+    if (!deviceId) {
+      return res.status(400).json({ success: false, message: 'deviceId is required' });
+    }
+
     const emailRecord = await Email.findOneAndUpdate(
-      { isUsed: false },
-      { 
-        $set: { 
-          isUsed: true, 
-          usedByDevice: deviceId, 
-          usedAt: new Date() 
-        } 
-      },
-      { new: true, sort: { createdAt: 1 } }
+      { assigned: false },
+      { $set: { assigned: true, deviceId: deviceId } },
+      { new: true }
     );
 
     if (!emailRecord) {
-      return res.status(404).json({ success: false, message: 'No unused emails available in database' });
+      return res.status(404).json({ success: false, message: 'No unused emails available' });
     }
 
     res.json({
       success: true,
       email: emailRecord.email,
-      assignedTo: emailRecord.usedByDevice
+      deviceId: emailRecord.deviceId
     });
-
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Server Error' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Serve Frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
