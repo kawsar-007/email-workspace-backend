@@ -1,86 +1,159 @@
 <!DOCTYPE html>
 <html lang="bn">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Email Management Dashboard</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
-    .container { max-width: 800px; margin: auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    h2 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
-    .card { background: #f9f9f9; padding: 15px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ddd; }
-    input, button, select { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; }
-    button { background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-    button:hover { background: #0056b3; }
-    .result { margin-top: 10px; padding: 10px; background: #e9ecef; border-radius: 4px; font-weight: bold; color: #28a745; word-break: break-all; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Management Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f9; padding: 20px; }
+        .card { max-width: 600px; margin: 20px auto; padding: 25px; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; color: #333; }
+        .section { margin-bottom: 25px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin-top: 15px; padding: 10px; border-radius: 4px; font-weight: bold; display: none; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    </style>
+    <!-- FingerprintJS CDN for Automatic Device ID Generation -->
+    <script src="https://openfpcdn.io/fingerprintjs/v3/umd.min.js"></script>
 </head>
 <body>
 
-<div class="container">
-  <h2>Email Management Dashboard</h2>
+<div class="card">
+    <h2>Email Management Dashboard</h2>
 
-  <!-- 1. Email Generator -->
-  <div class="card">
-    <h3>১. ইমেইল জেনারেট করুন</h3>
-    <label>সংখ্যা (০ দিলে অসীম/Unlimited ব্যাকগ্রাউন্ড জেনারেট হবে):</label>
-    <input type="number" id="genCount" value="0">
-    <label>কাস্টম ডোমেইন (ঐচ্ছিক):</label>
-    <input type="text" id="genDomain" placeholder="eg: gmail.com">
-    <button onclick="generateEmails()">জেনারেট শুরু করুন</button>
-    <div id="genResult" class="result" style="display:none;"></div>
-  </div>
+    <!-- 1. Generate Emails -->
+    <div class="section">
+        <h3>১. ইমেইল জেনারেট করুন</h3>
+        <label>সংখ্যা:</label>
+        <input type="number" id="genCount" value="100" placeholder="eg: 100">
+        
+        <label>ডোমেইন সিলেক্ট করুন:</label>
+        <select id="genDomainSelect" onchange="toggleCustomDomain(this.value)">
+            <option value="">Random Domains (সব ধরনের)</option>
+            <option value="gmail.com">gmail.com</option>
+            <option value="yahoo.com">yahoo.com</option>
+            <option value="outlook.com">outlook.com</option>
+            <option value="hotmail.com">hotmail.com</option>
+            <option value="icloud.com">icloud.com</option>
+            <option value="aol.com">aol.com</option>
+            <option value="proton.me">proton.me</option>
+            <option value="zoho.com">zoho.com</option>
+            <option value="gmx.com">gmx.com</option>
+            <option value="mail.com">mail.com</option>
+            <option value="custom">-- কাস্টম ডোমেইন টাইপ করুন --</option>
+        </select>
 
-  <!-- 2. Fetch Email for Device -->
-  <div class="card">
-    <h3>২. ডিভাইসের জন্য ইউনিক ইমেইল তুলুন</h3>
-    <input type="text" id="deviceId" placeholder="Device ID লিখুন (eg: DEVICE_001)">
-    <button onclick="fetchUnusedEmail()">ইমেইল নিন</button>
-    <div id="fetchResult" class="result" style="display:none;"></div>
-  </div>
+        <div id="customDomainGroup" style="display: none;">
+            <label>নিজের ইচ্ছেমতো ডোমেইন লিখুন (যেমন: mydomain.com):</label>
+            <input type="text" id="genDomainCustom" placeholder="eg: customdomain.com">
+        </div>
+        
+        <button onclick="generateEmails()">জেনারেট শুরু করুন</button>
+        <div id="genStatus" class="result"></div>
+    </div>
+
+    <!-- 2. Get Device Email -->
+    <div class="section">
+        <h3>২. ডিভাইসের জন্য ইউনিক ইমেইল তুলুন</h3>
+        <label>Auto-Detected Device Hardware ID (Fingerprint):</label>
+        <input type="text" id="deviceId" placeholder="ডিভাইস আইডি লোড হচ্ছে..." readonly style="background: #e9ecef;">
+        
+        <button onclick="getDeviceEmail()">ইমেইল নিন</button>
+        <div id="deviceResult" class="result"></div>
+    </div>
 </div>
 
 <script>
-  async function generateEmails() {
-    const count = parseInt(document.getElementById('genCount').value) || 0;
-    const domain = document.getElementById('genDomain').value.trim();
-    const resDiv = document.getElementById('genResult');
-
-    const response = await fetch('/api/emails/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ count, domain: domain || undefined })
-    });
-    const data = await response.json();
-    resDiv.style.display = 'block';
-    resDiv.innerText = data.message;
-  }
-
-  async function fetchUnusedEmail() {
-    const deviceId = document.getElementById('deviceId').value.trim();
-    const resDiv = document.getElementById('fetchResult');
-
-    if (!deviceId) {
-      alert('অনুগ্রহ করে Device ID লিখুন');
-      return;
+    // Show/hide custom domain input
+    function toggleCustomDomain(val) {
+        const customInput = document.getElementById('customDomainGroup');
+        if (val === 'custom') {
+            customInput.style.display = 'block';
+        } else {
+            customInput.style.display = 'none';
+        }
     }
 
-    const response = await fetch('/api/emails/fetch-unused', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId })
-    });
-    const data = await response.json();
-    resDiv.style.display = 'block';
+    // 1. Auto detect browser fingerprint on page load
+    const fpPromise = FingerprintJS.load();
+    fpPromise
+      .then(fp => fp.get())
+      .then(result => {
+        const visitorId = result.visitorId;
+        document.getElementById('deviceId').value = visitorId;
+      })
+      .catch(err => {
+        console.error("Fingerprint Error:", err);
+        document.getElementById('deviceId').value = 'DEV_' + Math.random().toString(36).substring(2, 9);
+      });
 
-    if (data.success) {
-      resDiv.style.color = '#28a745';
-      resDiv.innerText = `Assigned Email: ${data.email}`;
-    } else {
-      resDiv.style.color = '#dc3545';
-      resDiv.innerText = data.message;
+    // 2. Background Email Generator Call
+    async function generateEmails() {
+        const count = document.getElementById('genCount').value || 100;
+        const domainSelect = document.getElementById('genDomainSelect').value;
+        let domain = domainSelect;
+
+        if (domainSelect === 'custom') {
+            domain = document.getElementById('genDomainCustom').value.trim();
+        }
+
+        const statusDiv = document.getElementById('genStatus');
+
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'result success';
+        statusDiv.innerText = 'জেনারেট অনুরোধ পাঠানো হচ্ছে...';
+
+        try {
+            const res = await fetch('/api/generate-emails', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count: parseInt(count), domain })
+            });
+            const data = await res.json();
+            statusDiv.innerText = data.message || 'জেনারেট সফল হয়েছে!';
+        } catch (err) {
+            statusDiv.className = 'result error';
+            statusDiv.innerText = 'ইমেইল জেনারেট করতে সমস্যা হয়েছে।';
+        }
     }
-  }
+
+    // 3. Get Email Assigned to Device
+    async function getDeviceEmail() {
+        const deviceId = document.getElementById('deviceId').value;
+        const resultDiv = document.getElementById('deviceResult');
+
+        if (!deviceId) {
+            alert('ডিভাইস আইডি পাওয়া যায়নি! দয়া করে পেজটি রিফ্রেশ করুন।');
+            return;
+        }
+
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'result success';
+        resultDiv.innerText = 'ইমেইল চেক করা হচ্ছে...';
+
+        try {
+            const res = await fetch('/api/get-device-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId })
+            });
+            const data = await res.json();
+            
+            if(data.success) {
+                resultDiv.innerText = `অ্যাসাইন করা ইমেইল: ${data.email}`;
+            } else {
+                resultDiv.className = 'result error';
+                resultDiv.innerText = data.error || 'কোনো ইমেইল পাওয়া যায়নি।';
+            }
+        } catch (err) {
+            resultDiv.className = 'result error';
+            resultDiv.innerText = 'সার্ভার থেকে ইমেইল আনা সম্ভব হয়নি।';
+        }
+    }
 </script>
 
 </body>
