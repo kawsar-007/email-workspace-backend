@@ -13,23 +13,27 @@ app.use(express.json());
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// MongoDB Connection Setup
+// MongoDB Connection with Auto-reconnect & Strict Timeouts
 const MONGO_URI = process.env.MONGO_URI || "YOUR_MONGODB_ATLAS_CONNECTION_STRING";
-mongoose.connect(MONGO_URI)
-    .then(() => console.log('MongoDB Connected Successfully'))
-    .catch(err => console.error('MongoDB Connection Error:', err));
 
-// Database Schema
+mongoose.connect(MONGO_URI, {
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+})
+.then(() => console.log('MongoDB Connected Successfully'))
+.catch(err => console.error('MongoDB Connection Error:', err));
+
+// Database Schema & Indexes for High Performance
 const emailSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
-    isUsed: { type: Boolean, default: false },
+    isUsed: { type: Boolean, default: false, index: true },
     assignedDevice: { type: String, default: null },
     createdAt: { type: Date, default: Date.now }
 });
 
 const EmailModel = mongoose.model('Email', emailSchema);
 
-// PRE-VALIDATED REAL GLOBAL DOMAINS LIST (21 Domains)
+// 21 Pre-Verified Domains
 const ALLOWED_DOMAINS = [
     'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 
     'icloud.com', 'mail.com', 'zoho.com', 'proton.me', 
@@ -39,9 +43,13 @@ const ALLOWED_DOMAINS = [
     'sbcglobal.net'
 ];
 
-// FAST & VALID API: High-speed instant generation
+// FAST API: Batch Email Generation
 app.post('/api/generate-emails', async (req, res) => {
     try {
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(503).json({ success: false, error: 'Database is connecting. Please retry in a few seconds.' });
+        }
+
         const { count = 3, domain = 'all' } = req.body;
         const requestedCount = Math.min(parseInt(count) || 3, 50);
         
@@ -63,7 +71,6 @@ app.post('/api/generate-emails', async (req, res) => {
             docsToInsert.push({ email, isUsed: false });
         }
 
-        // Bulk insert to MongoDB ignoring potential duplicate index collisions
         await EmailModel.insertMany(docsToInsert, { ordered: false }).catch(() => {});
 
         res.json({
@@ -78,9 +85,16 @@ app.post('/api/generate-emails', async (req, res) => {
     }
 });
 
-// Robust API: Get Single Unused Email safely with proper query structure
+// INSTANT API: Assign Email to Device (Fixed Timeout Error)
 app.post('/api/get-email', async (req, res) => {
     try {
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(503).json({ 
+                success: false, 
+                error: 'Database is connecting. Please click again in 2 seconds.' 
+            });
+        }
+
         const { deviceId } = req.body;
         
         if (!deviceId || typeof deviceId !== 'string') {
@@ -90,7 +104,6 @@ app.post('/api/get-email', async (req, res) => {
             });
         }
 
-        // Find an unassigned email and mark it used atomically
         const assignedEmail = await EmailModel.findOneAndUpdate(
             { isUsed: false },
             { 
@@ -99,7 +112,7 @@ app.post('/api/get-email', async (req, res) => {
                     assignedDevice: deviceId.trim() 
                 } 
             },
-            { new: true, sort: { createdAt: 1 } }
+            { new: true }
         ).exec();
 
         if (!assignedEmail) {
@@ -128,7 +141,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Wildcard Fallback Route for Single Page Application routing
+// Wildcard Fallback Route
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
