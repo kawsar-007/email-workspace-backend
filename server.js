@@ -15,10 +15,10 @@ app.use(cors());
 // Web Dashboard Static Files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Direct MongoDB Atlas Connection with Provided Credentials
-const mongoURI = "mongodb+srv://kawsarmahamud14_db_user:BZHFzP67WepBJEGF@cluster0.abcde.mongodb.net/EmailDB?retryWrites=true&w=majority";
+// MongoDB Connection
+const mongoURI = process.env.MONGO_URI || "mongodb+srv://kawsarmahamud14_db_user:BZHFzP67WepBJEGF@cluster0.abcde.mongodb.net/EmailDB?retryWrites=true&w=majority";
 
-mongoose.connect(process.env.MONGO_URI || mongoURI)
+mongoose.connect(mongoURI)
   .then(() => console.log('MongoDB Database Connected Successfully'))
   .catch(err => console.error('MongoDB Connection Error:', err));
 
@@ -33,7 +33,7 @@ const EmailSchema = new mongoose.Schema({
 
 const Email = mongoose.model('Email', EmailSchema);
 
-// Expanded First Name Pool (50+ Names)
+// Pools
 const firstNames = [
   'john', 'alex', 'david', 'michael', 'james', 'robert', 'william', 'daniel', 'matthew', 'joseph', 
   'samuel', 'anthony', 'andrew', 'ryan', 'brandon', 'jason', 'ethan', 'joshua', 'noah', 'logan', 
@@ -42,7 +42,6 @@ const firstNames = [
   'dylan', 'grayson', 'levi', 'isaac', 'cameron', 'caleb', 'christian', 'hunter', 'aaron', 'charles'
 ];
 
-// Expanded Last Name Pool (50+ Names)
 const lastNames = [
   'smith', 'johnson', 'williams', 'brown', 'jones', 'miller', 'davis', 'garcia', 'rodriguez', 'wilson', 
   'martinez', 'taylor', 'anderson', 'thomas', 'white', 'harris', 'martin', 'thompson', 'robinson', 'clark', 
@@ -51,7 +50,6 @@ const lastNames = [
   'roberts', 'turner', 'phillips', 'campbell', 'parker', 'evans', 'edwards', 'collins', 'stewart', 'morris'
 ];
 
-// Full Domain Pool (Major, Regional & Free Webmail Providers)
 const defaultDomains = [
   'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com',
   'live.com', 'msn.com', 'ymail.com', 'rocketmail.com',
@@ -63,7 +61,6 @@ function getRandomElement(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Custom Email Pattern Generator
 function generateEmailPattern(customDomain) {
   const fName = getRandomElement(firstNames);
   const lName = getRandomElement(lastNames);
@@ -81,7 +78,6 @@ function generateEmailPattern(customDomain) {
   return getRandomElement(formats);
 }
 
-// MX Validation Helper Function
 async function validateMxRecord(email) {
   try {
     const domain = email.split('@')[1];
@@ -92,9 +88,25 @@ async function validateMxRecord(email) {
   }
 }
 
-// 1. Unlimited / Bulk Background Email Generator API (Validated)
+// ------------------- API ENDPOINTS -------------------
+
+// Home Route Checklist
+app.get('/', (req, res) => {
+  res.json({ success: true, message: "Email Workspace Backend is Live Serverally!" });
+});
+
+// NEW: GET All Available Domains List
+app.get('/api/domains', (req, res) => {
+  res.json({
+    success: true,
+    totalDomains: defaultDomains.length,
+    domains: defaultDomains
+  });
+});
+
+// 1. Bulk Background Email Generator API
 app.post('/api/emails/generate', async (req, res) => {
-  const { count = 0, domain } = req.body; // count = 0 means Unlimited
+  const { count = 0, domain } = req.body;
 
   res.json({
     success: true,
@@ -108,7 +120,6 @@ app.post('/api/emails/generate', async (req, res) => {
     while (generatedCount < target) {
       const email = generateEmailPattern(domain);
 
-      // Check Syntax & MX Record
       if (validator.validate(email)) {
         const isValidMx = await validateMxRecord(email);
         if (isValidMx) {
@@ -121,12 +132,10 @@ app.post('/api/emails/generate', async (req, res) => {
               console.log(`[Workspace Engine] Generated & saved ${generatedCount} validated emails.`);
             }
           } catch (err) {
-            // Skips duplicates automatically
+            // Skips duplicates
           }
         }
       }
-      
-      // Prevent high CPU usage
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   })();
@@ -157,7 +166,7 @@ app.post('/api/emails/add', async (req, res) => {
   }
 });
 
-// 3. Fetch Unused Email for Device (Ensures 1 Email -> 1 Device Only)
+// 3. Fetch Unused Email for Device (1 Email -> 1 Device)
 app.post('/api/emails/fetch-unused', async (req, res) => {
   const { deviceId } = req.body;
 
@@ -166,7 +175,6 @@ app.post('/api/emails/fetch-unused', async (req, res) => {
   }
 
   try {
-    // Atomic Operation: Finds unassigned email and locks it instantly
     const emailRecord = await Email.findOneAndUpdate(
       { isUsed: false },
       { 
