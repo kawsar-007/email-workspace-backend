@@ -29,7 +29,7 @@ const emailSchema = new mongoose.Schema({
 
 const EmailModel = mongoose.model('Email', emailSchema);
 
-// PRE-VALIDATED REAL GLOBAL DOMAINS LIST
+// PRE-VALIDATED REAL GLOBAL DOMAINS LIST (21 Domains)
 const ALLOWED_DOMAINS = [
     'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 
     'icloud.com', 'mail.com', 'zoho.com', 'proton.me', 
@@ -39,7 +39,7 @@ const ALLOWED_DOMAINS = [
     'sbcglobal.net'
 ];
 
-// FAST & VALID API: Instant generation using verified domain set
+// FAST & VALID API: High-speed instant generation
 app.post('/api/generate-emails', async (req, res) => {
     try {
         const { count = 3, domain = 'all' } = req.body;
@@ -54,7 +54,6 @@ app.post('/api/generate-emails', async (req, res) => {
                 selectedDomain = ALLOWED_DOMAINS[Math.floor(Math.random() * ALLOWED_DOMAINS.length)];
             }
 
-            // Standard RFC 5322 compliant email structure
             const firstName = faker.person.firstName().toLowerCase().replace(/[^a-z0-9]/g, '');
             const lastName = faker.person.lastName().toLowerCase().replace(/[^a-z0-9]/g, '');
             const randomNum = Math.floor(Math.random() * 8999) + 1000;
@@ -64,7 +63,7 @@ app.post('/api/generate-emails', async (req, res) => {
             docsToInsert.push({ email, isUsed: false });
         }
 
-        // Bulk insert ignoring duplicate conflicts
+        // Bulk insert to MongoDB ignoring potential duplicate index collisions
         await EmailModel.insertMany(docsToInsert, { ordered: false }).catch(() => {});
 
         res.json({
@@ -79,32 +78,48 @@ app.post('/api/generate-emails', async (req, res) => {
     }
 });
 
-// API: Get Single Unused Email
+// Robust API: Get Single Unused Email safely with proper query structure
 app.post('/api/get-email', async (req, res) => {
     try {
         const { deviceId } = req.body;
-        if (!deviceId) {
-            return res.status(400).json({ success: false, error: 'Device ID is required.' });
+        
+        if (!deviceId || typeof deviceId !== 'string') {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Valid Device ID is required.' 
+            });
         }
 
+        // Find an unassigned email and mark it used atomically
         const assignedEmail = await EmailModel.findOneAndUpdate(
             { isUsed: false },
-            { $set: { isUsed: true, assignedDevice: deviceId } },
+            { 
+                $set: { 
+                    isUsed: true, 
+                    assignedDevice: deviceId.trim() 
+                } 
+            },
             { new: true, sort: { createdAt: 1 } }
-        );
+        ).exec();
 
         if (!assignedEmail) {
-            return res.status(404).json({ success: false, error: 'No fresh emails available. Please generate emails first!' });
+            return res.status(404).json({ 
+                success: false, 
+                error: 'No fresh emails available. Please generate emails first!' 
+            });
         }
 
-        res.json({
+        return res.json({
             success: true,
             email: assignedEmail.email
         });
 
     } catch (error) {
-        console.error("Fetch Error:", error);
-        res.status(500).json({ success: false, error: 'Internal Server Error' });
+        console.error("Get Email Database Error:", error.message || error);
+        return res.status(500).json({ 
+            success: false, 
+            error: error.message || 'Internal Server Error' 
+        });
     }
 });
 
@@ -113,7 +128,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Wildcard Fallback Route
+// Wildcard Fallback Route for Single Page Application routing
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
