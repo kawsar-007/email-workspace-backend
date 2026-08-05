@@ -4,6 +4,7 @@ import { faker } from '@faker-js/faker';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dns from 'dns/promises';
+import net from 'net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,7 +13,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// MongoDB Connection Setup
+// MongoDB Connection
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://user:pass@cluster.mongodb.net/emaildb";
 
 mongoose.connect(MONGO_URI, {
@@ -32,7 +33,6 @@ const emailSchema = new mongoose.Schema({
 
 const EmailModel = mongoose.model('Email', emailSchema);
 
-// Pre-validated 21 Active Global Domains
 const ALLOWED_DOMAINS = [
     'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 
     'aol.com', 'zoho.com', 'proton.me', 'mail.com', 'gmx.com', 
@@ -40,46 +40,83 @@ const ALLOWED_DOMAINS = [
     'verizon.net', 'att.net', 'me.com', 'mac.com', 'rocketmail.com', 'cox.net'
 ];
 
-// Helper Function: Check Domain MX Records (Active Mail Exchange Verification)
-async function verifyDomainMX(domain) {
-    try {
-        const mxRecords = await dns.resolveMx(domain);
-        return mxRecords && mxRecords.length > 0;
-    } catch (error) {
-        return false;
-    }
+// SMTP Ping Function: Checks if the inbox actually exists
+function verifyEmailSMTP(email, domain) {
+    return new Promise(async (resolve) => {
+        try {
+            const mxRecords = await dns.resolveMx(domain);
+            if (!mxRecords || mxRecords.length === 0) return resolve(false);
+
+            const exchange = mxRecords.sort((a, b) => a.priority - b.priority)[0].exchange;
+            const socket = net.createConnection(25, exchange);
+
+            let isReal = false;
+            let step = 0;
+
+            socket.setTimeout(4000); // 4 seconds timeout
+
+            socket.on('data', (data) => {
+                const response = data.toString();
+                if (step === 0 && response.startsWith('220')) {
+                    socket.write(`EHLO check.com\r\n`);
+                    step++;
+                } else if (step === 1 && response.startsWith('250')) {
+                    socket.write(`MAIL FROM:<test@check.com>\r\n`);
+                    step++;
+                } else if (step === 2 && response.startsWith('250')) {
+                    socket.write(`RCPT TO:<${email}>\r\n`);
+                    step++;
+                } else if (step === 3) {
+                    if (response.startsWith('250')) {
+                        isReal = true;
+                    }
+                    socket.write(`QUIT\r\n`);
+                    socket.end();
+                }
+            });
+
+            socket.on('error', () => { socket.destroy(); resolve(false); });
+            socket.on('timeout', () => { socket.destroy(); resolve(false); });
+            socket.on('close', () => resolve(isReal));
+
+        } catch (err) {
+            resolve(false);
+        }
+    });
 }
 
-// 1. GENERATE EMAILS ENDPOINT
+// GENERATE & VERIFY EMAILS ENDPOINT
 app.post('/api/generate-emails', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({ success: false, error: 'Database is connecting. Please retry in a few seconds.' });
+            return res.status(503).json({ success: false, error: 'Database is connecting. Please retry.' });
         }
 
         const { count = 3, domain = 'all' } = req.body;
-        const requestedCount = Math.min(parseInt(count) || 3, 50);
+        const requestedCount = Math.min(parseInt(count) || 3, 100);
 
-        let generatedEmails = [];
+        let verifiedEmails = [];
         let docsToInsert = [];
+        let attempts = 0;
+        const maxAttempts = requestedCount * 5;
 
-        for (let i = 0; i < requestedCount; i++) {
+        while (verifiedEmails.length < requestedCount && attempts < maxAttempts) {
+            attempts++;
             let selectedDomain = domain;
             if (domain === 'all' || !ALLOWED_DOMAINS.includes(domain)) {
                 selectedDomain = ALLOWED_DOMAINS[Math.floor(Math.random() * ALLOWED_DOMAINS.length)];
             }
 
-            // Real-time Domain Mail Exchange Check
-            const isMxActive = await verifyDomainMX(selectedDomain);
+            const firstName = faker.person.firstName().toLowerCase().replace(/[^a-z0-9]/g, '');
+            const lastName = faker.person.lastName().toLowerCase().replace(/[^a-z0-9]/g, '');
+            const randomNum = Math.floor(Math.random() * 8999) + 1000;
+            const candidateEmail = `${firstName}.${lastName}${randomNum}@${selectedDomain}`;
 
-            if (isMxActive) {
-                const firstName = faker.person.firstName().toLowerCase().replace(/[^a-z0-9]/g, '');
-                const lastName = faker.person.lastName().toLowerCase().replace(/[^a-z0-9]/g, '');
-                const randomNum = Math.floor(Math.random() * 8999) + 1000;
-                const email = `${firstName}.${lastName}${randomNum}@${selectedDomain}`;
+            const isValidInbox = await verifyEmailSMTP(candidateEmail, selectedDomain);
 
-                generatedEmails.push(email);
-                docsToInsert.push({ email, isUsed: false });
+            if (isValidInbox) {
+                verifiedEmails.push(candidateEmail);
+                docsToInsert.push({ email: candidateEmail, isUsed: false });
             }
         }
 
@@ -89,8 +126,8 @@ app.post('/api/generate-emails', async (req, res) => {
 
         res.json({
             success: true,
-            message: `Successfully generated ${generatedEmails.length} valid emails!`,
-            emails: generatedEmails
+            message: `Successfully verified and generated ${verifiedEmails.length} active emails!`,
+            emails: verifiedEmails
         });
 
     } catch (error) {
@@ -99,17 +136,15 @@ app.post('/api/generate-emails', async (req, res) => {
     }
 });
 
-// 2. GET & ASSIGN EMAIL FOR DEVICE ENDPOINT
+// ASSIGN EMAIL ENDPOINT
 app.post('/api/get-email', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({ success: false, error: 'Database is connecting. Please retry in a few seconds.' });
+            return res.status(503).json({ success: false, error: 'Database is connecting. Please retry.' });
         }
 
         const { deviceId } = req.body;
-        if (!deviceId || typeof deviceId !== 'string') {
-            return res.status(400).json({ success: false, error: 'Valid Device ID is required.' });
-        }
+        if (!deviceId) return res.status(400).json({ success: false, error: 'Device ID required.' });
 
         const assignedEmail = await EmailModel.findOneAndUpdate(
             { isUsed: false },
@@ -118,23 +153,16 @@ app.post('/api/get-email', async (req, res) => {
         ).exec();
 
         if (!assignedEmail) {
-            return res.status(404).json({ success: false, error: 'No fresh emails available. Please generate more.' });
+            return res.status(404).json({ success: false, error: 'No verified emails left. Generate more.' });
         }
 
-        return res.json({
-            success: true,
-            email: assignedEmail.email
-        });
-
+        res.json({ success: true, email: assignedEmail.email });
     } catch (error) {
-        console.error("Assignment Error:", error);
-        return res.status(500).json({ success: false, error: 'Internal Server Error' });
+        res.status(500).json({ success: false, error: 'Server error' });
     }
 });
 
-// SPA Routing Support
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

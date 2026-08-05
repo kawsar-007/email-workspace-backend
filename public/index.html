@@ -22,7 +22,7 @@
     <div>
         <div class="card">
             <h3>1. Generate Valid Emails</h3>
-            <input type="number" id="count" value="3" min="1" max="50">
+            <input type="number" id="count" value="10" min="1" max="100">
             <select id="domain">
                 <option value="all">All Domains (21 Domains Randomly)</option>
                 <option value="gmail.com">gmail.com</option>
@@ -73,7 +73,7 @@
         async function generateEmails() {
             const statusDiv = document.getElementById('genStatus');
             statusDiv.className = 'status';
-            statusDiv.innerText = 'Generating...';
+            statusDiv.innerText = 'Verifying and Generating...';
             statusDiv.style.display = 'block';
 
             const count = document.getElementById('count').value;
