@@ -10,6 +10,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json());
+
+// Serve static files from the project root directory
 app.use(express.static(__dirname));
 
 // MongoDB Connection
@@ -53,11 +55,6 @@ const ALLOWED_DOMAINS = [
     'sbcglobal.net'
 ];
 
-// Home Route Fix
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
 // API: Generate Validated Emails
 app.post('/api/generate-emails', async (req, res) => {
     try {
@@ -95,7 +92,7 @@ app.post('/api/generate-emails', async (req, res) => {
                     validEmails.push(email);
                 }
             } catch (vErr) {
-                // Ignore duplicates or validation errors
+                // Skip duplicate key errors or invalid syntax
             }
         }
 
@@ -142,6 +139,11 @@ app.post('/api/get-email', async (req, res) => {
         console.error("Fetch Error:", error);
         res.status(500).json({ success: false, error: 'Internal Server Error' });
     }
+});
+
+// Wildcard Route: Serve index.html for all non-API GET requests
+app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
