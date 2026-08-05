@@ -12,13 +12,13 @@ const app = express();
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// MongoDB Connection (Replace with your own Mongo URI if needed)
+// MongoDB Connection
 const MONGO_URI = process.env.MONGO_URI || "YOUR_MONGODB_ATLAS_CONNECTION_STRING";
 mongoose.connect(MONGO_URI)
     .then(() => console.log('MongoDB Connected Successfully'))
     .catch(err => console.error('MongoDB Connection Error:', err));
 
-// Email Schema
+// Database Schema
 const emailSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     isUsed: { type: Boolean, default: false },
@@ -28,11 +28,35 @@ const emailSchema = new mongoose.Schema({
 
 const EmailModel = mongoose.model('Email', emailSchema);
 
+// ALL 21 DOMAINS LIST
 const ALLOWED_DOMAINS = [
-    'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 
-    'icloud.com', 'mail.com', 'zoho.com', 'proton.me', 
-    'protonmail.com', 'gmx.com', 'yandex.com', 'aol.com'
+    'gmail.com', 
+    'yahoo.com', 
+    'outlook.com', 
+    'hotmail.com', 
+    'icloud.com', 
+    'mail.com', 
+    'zoho.com', 
+    'proton.me', 
+    'protonmail.com', 
+    'gmx.com', 
+    'yandex.com', 
+    'aol.com',
+    'live.com',
+    'msn.com',
+    'inbox.com',
+    'fastmail.com',
+    'hushmail.com',
+    'lycos.com',
+    'rediffmail.com',
+    'comcast.net',
+    'sbcglobal.net'
 ];
+
+// Home Route Fix
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // API: Generate Validated Emails
 app.post('/api/generate-emails', async (req, res) => {
@@ -40,11 +64,12 @@ app.post('/api/generate-emails', async (req, res) => {
         const { count = 3, domain = 'all' } = req.body;
         let validEmails = [];
         let attempts = 0;
-        const maxAttempts = count * 6;
+        const maxAttempts = count * 8;
 
         while (validEmails.length < count && attempts < maxAttempts) {
             attempts++;
             let selectedDomain = domain;
+            
             if (domain === 'all' || !ALLOWED_DOMAINS.includes(domain)) {
                 selectedDomain = ALLOWED_DOMAINS[Math.floor(Math.random() * ALLOWED_DOMAINS.length)];
             }
@@ -61,7 +86,7 @@ app.post('/api/generate-emails', async (req, res) => {
                     validateMx: true,
                     validateTypo: false,
                     validateDisposable: true,
-                    validateSMTP: false // Fast validation without cloud timeout issues
+                    validateSMTP: false
                 });
 
                 if (resValidation.valid) {
@@ -70,7 +95,7 @@ app.post('/api/generate-emails', async (req, res) => {
                     validEmails.push(email);
                 }
             } catch (vErr) {
-                // Ignore duplicate or validation error cycles
+                // Ignore duplicates or validation errors
             }
         }
 
@@ -90,7 +115,7 @@ app.post('/api/generate-emails', async (req, res) => {
     }
 });
 
-// API: Get Single Fresh Email per Request
+// API: Get Single Unused Email
 app.post('/api/get-email', async (req, res) => {
     try {
         const { deviceId } = req.body;
@@ -98,7 +123,6 @@ app.post('/api/get-email', async (req, res) => {
             return res.status(400).json({ success: false, error: 'Device ID is required.' });
         }
 
-        // Atomic update to pick a fresh unused email
         const assignedEmail = await EmailModel.findOneAndUpdate(
             { isUsed: false },
             { $set: { isUsed: true, assignedDevice: deviceId } },

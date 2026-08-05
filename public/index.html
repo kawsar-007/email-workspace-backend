@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Generator System</title>
+    <title>Email Generator Workspace</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -15,7 +15,7 @@
 
 <div class="container" style="max-width: 600px;">
 
-    <!-- Section 1: Generate Emails -->
+    <!-- Card 1: Generate Emails -->
     <div class="card p-4 mb-4">
         <h4 class="card-title text-center mb-3">1. Generate Valid Emails</h4>
         
@@ -38,15 +38,24 @@
                 <option value="gmx.com">gmx.com</option>
                 <option value="yandex.com">yandex.com</option>
                 <option value="aol.com">aol.com</option>
+                <option value="live.com">live.com</option>
+                <option value="msn.com">msn.com</option>
+                <option value="inbox.com">inbox.com</option>
+                <option value="fastmail.com">fastmail.com</option>
+                <option value="hushmail.com">hushmail.com</option>
+                <option value="lycos.com">lycos.com</option>
+                <option value="rediffmail.com">rediffmail.com</option>
+                <option value="comcast.net">comcast.net</option>
+                <option value="sbcglobal.net">sbcglobal.net</option>
             </select>
         </div>
 
-        <button id="btnGenerate" class="btn btn-success btn-custom w-100">Generate Emails with Validation</button>
+        <button id="btnGenerate" class="btn btn-success btn-custom w-100">Generate Emails</button>
 
-        <div id="generateMessage" class="mt-3 text-center display-none"></div>
+        <div id="generateMessage" class="mt-3 text-center" style="display: none;"></div>
     </div>
 
-    <!-- Section 2: Get Email for Device -->
+    <!-- Card 2: Get Device Email -->
     <div class="card p-4">
         <h4 class="card-title text-center mb-3">2. Assign Email for Device</h4>
 
@@ -56,13 +65,12 @@
 
         <button id="btnGetEmail" class="btn btn-primary btn-custom w-100">Get New Email</button>
 
-        <div id="fetchMessage" class="mt-3 text-center display-none"></div>
+        <div id="fetchMessage" class="mt-3 text-center" style="display: none;"></div>
     </div>
 
 </div>
 
 <script>
-    // Generate or fetch Device ID
     let deviceId = localStorage.getItem('device_id');
     if (!deviceId) {
         deviceId = 'DEV-' + Math.random().toString(36).substring(2, 10).toUpperCase() + '-' + Date.now();
@@ -70,10 +78,8 @@
     }
     document.getElementById('deviceId').value = `Device ID: ${deviceId}`;
 
-    // Backend URL
     const API_BASE = window.location.origin;
 
-    // Generate Emails Event
     document.getElementById('btnGenerate').addEventListener('click', async () => {
         const count = document.getElementById('emailCount').value;
         const domain = document.getElementById('domainSelect').value;
@@ -104,7 +110,6 @@
         }
     });
 
-    // Get New Email Event
     document.getElementById('btnGetEmail').addEventListener('click', async () => {
         const msgDiv = document.getElementById('fetchMessage');
         msgDiv.className = 'alert alert-info mt-3 text-center';
