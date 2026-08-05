@@ -11,10 +11,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 
-// Serve static files from the project root directory
-app.use(express.static(__dirname));
+// Serve static files directly from the public folder
+app.use(express.static(path.join(__dirname, 'public')));
 
-// MongoDB Connection
+// MongoDB Connection Setup
 const MONGO_URI = process.env.MONGO_URI || "YOUR_MONGODB_ATLAS_CONNECTION_STRING";
 mongoose.connect(MONGO_URI)
     .then(() => console.log('MongoDB Connected Successfully'))
@@ -32,26 +32,11 @@ const EmailModel = mongoose.model('Email', emailSchema);
 
 // ALL 21 DOMAINS LIST
 const ALLOWED_DOMAINS = [
-    'gmail.com', 
-    'yahoo.com', 
-    'outlook.com', 
-    'hotmail.com', 
-    'icloud.com', 
-    'mail.com', 
-    'zoho.com', 
-    'proton.me', 
-    'protonmail.com', 
-    'gmx.com', 
-    'yandex.com', 
-    'aol.com',
-    'live.com',
-    'msn.com',
-    'inbox.com',
-    'fastmail.com',
-    'hushmail.com',
-    'lycos.com',
-    'rediffmail.com',
-    'comcast.net',
+    'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 
+    'icloud.com', 'mail.com', 'zoho.com', 'proton.me', 
+    'protonmail.com', 'gmx.com', 'yandex.com', 'aol.com',
+    'live.com', 'msn.com', 'inbox.com', 'fastmail.com',
+    'hushmail.com', 'lycos.com', 'rediffmail.com', 'comcast.net',
     'sbcglobal.net'
 ];
 
@@ -92,7 +77,7 @@ app.post('/api/generate-emails', async (req, res) => {
                     validEmails.push(email);
                 }
             } catch (vErr) {
-                // Skip duplicate key errors or invalid syntax
+                // Skip duplicates
             }
         }
 
@@ -141,9 +126,14 @@ app.post('/api/get-email', async (req, res) => {
     }
 });
 
-// Wildcard Route: Serve index.html for all non-API GET requests
+// Primary Home Route
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Wildcard Fallback Route to serve public/index.html
 app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, 'index.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
