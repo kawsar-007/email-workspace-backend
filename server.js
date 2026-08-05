@@ -14,7 +14,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // MongoDB Connection
-const MONGO_URI = process.env.MONGO_URI || 'your_mongodb_connection_string_here';
+const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
   .then(() => console.log('MongoDB Connected Successfully'))
   .catch((err) => console.error('MongoDB Connection Error:', err));
@@ -121,7 +121,7 @@ app.post('/api/get-device-email', async (req, res) => {
 });
 
 // Express v5 Compatible Wildcard Route (Fixes PathError)
-app.get('(.*)', (req, res) => {
+app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
