@@ -3,119 +3,129 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const { faker } = require('@faker-js/faker');
+require('dotenv').config();
 
 const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Environment / Config Variables
-const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://kawsarmahamud14_db_user:BZHFzP67WepBJEGF@cluster0.rtr3kmq.mongodb.net/emailDB?retryWrites=true&w=majority";
-
 // MongoDB Connection
+const MONGO_URI = process.env.MONGO_URI || 'your_mongodb_connection_string_here';
 mongoose.connect(MONGO_URI)
   .then(() => console.log('MongoDB Connected Successfully'))
-  .catch(err => console.error('MongoDB Connection Error:', err));
+  .catch((err) => console.error('MongoDB Connection Error:', err));
 
-// Email Schema
+// Database Schema & Model
 const emailSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
-  assigned: { type: Boolean, default: false },
   deviceId: { type: String, default: null },
-  createdAt: { type: Date, default: Date.now }
+  assignedAt: { type: Date, default: null },
+  isAssigned: { type: Boolean, default: false }
 });
 
 const Email = mongoose.model('Email', emailSchema);
 
-// ২১টি ডোমেইন প্রোভাইডার লিস্ট
-const defaultDomains = [
-  'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com',
-  'aol.com', 'protonmail.com', 'zoho.com', 'gmx.com', 'mail.com',
-  'yandex.com', 'fastmail.com', 'hushmail.com', 'lycos.com', 'inbox.com',
-  'rediffmail.com', 'proton.me', 'live.com', 'msn.com', 'cox.net', 'sbcglobal.net'
-];
+// Supported Domains
+const DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'];
 
-function getRandomItem(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+// --- API ENDPOINTS ---
 
-// Faker.js ব্যবহার করে আনলিমিটেড ইউনিক ইমেইল জেনারেট করার ফাংশন
-function generateRandomEmail(customDomain) {
-  const fname = faker.person.firstName().toLowerCase().replace(/[^a-z]/g, '');
-  const lname = faker.person.lastName().toLowerCase().replace(/[^a-z]/g, '');
-  const num = faker.number.int({ min: 1000, max: 9999 });
-  const domain = customDomain || getRandomItem(defaultDomains);
-  
-  return `${fname}.${lname}${num}@${domain}`;
-}
-
-// 1. Fetch Domains
+// 1. Get Available Domains
 app.get('/api/domains', (req, res) => {
-  res.json({ domains: defaultDomains });
+  res.json({ success: true, domains: DOMAINS });
 });
 
-// 2. Generate Emails
-app.post('/api/emails/generate', async (req, res) => {
+// 2. Generate Emails (Background Generation using Faker.js)
+app.post('/api/generate-emails', async (req, res) => {
   try {
-    const { count = 1, domain } = req.body;
-    const limit = parseInt(count) || 1;
-    let generatedCount = 0;
+    const { count = 100, domain } = req.body;
+    const generateCount = parseInt(count, 10);
 
-    for (let i = 0; i < limit; i++) {
-      const emailStr = generateRandomEmail(domain);
-      try {
-        await Email.create({ email: emailStr });
-        generatedCount++;
-      } catch (err) {
-        // Skip duplicate email errors if any overlap happens
+    // Run background insertion asynchronously
+    (async () => {
+      const emailDocs = [];
+      for (let i = 0; i < generateCount; i++) {
+        const firstName = faker.person.firstName().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const lastName = faker.person.lastName().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const randomNumber = faker.number.int({ min: 10, max: 9999 });
+        
+        const selectedDomain = domain && DOMAINS.includes(domain) 
+          ? domain 
+          : DOMAINS[Math.floor(Math.random() * DOMAINS.length)];
+
+        const generatedEmail = `${firstName}${lastName}${randomNumber}@${selectedDomain}`;
+        emailDocs.push({ email: generatedEmail });
       }
-    }
 
-    res.json({ 
-      success: true, 
-      message: `${generatedCount} emails generated and saved successfully.`,
-      count: generatedCount 
+      try {
+        await Email.insertMany(emailDocs, { ordered: false });
+      } catch (err) {
+        // Ignore duplicate key errors if generated email collides
+      }
+    })();
+
+    res.json({
+      success: true,
+      message: `Background email generation started for ${generateCount} records.`
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// 3. Fetch Unused Email for Device (Atomic Operation)
-app.post('/api/emails/fetch-unused', async (req, res) => {
+// 3. Assign 1:1 Unique Email for a Device (Atomic Logic)
+app.post('/api/get-device-email', async (req, res) => {
   try {
-    const deviceId = req.body.deviceId || req.body.device_id;
+    const { deviceId } = req.body;
 
     if (!deviceId) {
-      return res.status(400).json({ success: false, message: 'deviceId is required' });
+      return res.status(400).json({ success: false, error: 'Device ID is required.' });
     }
 
-    const emailRecord = await Email.findOneAndUpdate(
-      { assigned: false },
-      { $set: { assigned: true, deviceId: deviceId } },
+    // Check if device already has an assigned email
+    let existingAssignment = await Email.findOne({ deviceId });
+    if (existingAssignment) {
+      return res.json({
+        success: true,
+        email: existingAssignment.email,
+        message: 'Retrieved existing assigned email for this device.'
+      });
+    }
+
+    // Atomically find an unassigned email and map it to this device
+    const assignedEmail = await Email.findOneAndUpdate(
+      { isAssigned: false },
+      { $set: { deviceId, isAssigned: true, assignedAt: new Date() } },
       { new: true }
     );
 
-    if (!emailRecord) {
-      return res.status(404).json({ success: false, message: 'No unused emails available' });
+    if (!assignedEmail) {
+      return res.status(404).json({
+        success: false,
+        error: 'No unassigned emails available in pool. Please generate more.'
+      });
     }
 
     res.json({
       success: true,
-      email: emailRecord.email,
-      deviceId: emailRecord.deviceId
+      email: assignedEmail.email,
+      message: 'New unique email assigned successfully.'
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Serve Frontend
-app.get('*', (req, res) => {
+// Express v5 Compatible Wildcard Route (Fixes PathError)
+app.get('(.*)', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Start Server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
