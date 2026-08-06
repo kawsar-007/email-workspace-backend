@@ -4,7 +4,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dns from 'dns/promises';
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 import { faker } from '@faker-js/faker';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,13 +32,13 @@ const ALLOWED_DOMAINS = [
     'tutanota.com', 'runbox.com', 'hushmail.com', 'lycos.com', 'zohomail.com', 'inbox.com'
 ];
 
-// Fast MX Record Check
+// MX Check with Fast Timeout
 async function isValidDomainFast(email) {
     try {
         const domain = email.split('@')[1];
         if (!domain) return false;
         const mxPromise = dns.resolveMx(domain);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1500));
         const mxRecords = await Promise.race([mxPromise, timeoutPromise]);
         return mxRecords && mxRecords.length > 0;
     } catch {
@@ -47,79 +46,73 @@ async function isValidDomainFast(email) {
     }
 }
 
-// Scrape Emails via Multiple Sources
-async function fetchRealEmails(selectedDomain) {
-    let rawText = '';
-    const firstName = faker.person.firstName();
+// Multi-Source Real Email Fetcher
+async function fetchEmailsFromPublicSources(selectedDomain) {
+    let rawContent = '';
+    const name = faker.person.firstName().toLowerCase();
     const targetDomain = selectedDomain === 'all' 
         ? ALLOWED_DOMAINS[Math.floor(Math.random() * ALLOWED_DOMAINS.length)] 
         : selectedDomain;
 
-    const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36'
-    };
+    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
 
-    // Source 1: DuckDuckGo Lite (Optimized Query)
+    // Source 1: HackerNews Search API (No IP Blocks)
     try {
-        const query = `${firstName} ${targetDomain}`;
-        const params = new URLSearchParams({ q: query });
-        const { data } = await axios.post('https://lite.duckduckgo.com/lite/', params.toString(), {
+        const hnRes = await axios.get(`https://hn.algolia.com/api/v1/search?query=${name}%20${targetDomain}&hitsPerPage=30`, { timeout: 3000 });
+        rawContent += ' ' + JSON.stringify(hnRes.data);
+    } catch (e) {}
+
+    // Source 2: Reddit Search API
+    try {
+        const redditRes = await axios.get(`https://www.reddit.com/search.json?q=${name}+${targetDomain}&limit=25`, { headers, timeout: 3000 });
+        rawContent += ' ' + JSON.stringify(redditRes.data);
+    } catch (e) {}
+
+    // Source 3: DuckDuckGo Lite
+    try {
+        const params = new URLSearchParams({ q: `${name} "@${targetDomain}"` });
+        const ddgRes = await axios.post('https://lite.duckduckgo.com/lite/', params.toString(), {
             headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-            timeout: 3000
+            timeout: 2500
         });
-        const $ = cheerio.load(data);
-        rawText += ' ' + $('body').text();
+        rawContent += ' ' + ddgRes.data;
     } catch (e) {}
 
-    // Source 2: Reddit Public API (High Yield Fallback)
-    try {
-        const redditQuery = `${firstName} ${targetDomain}`;
-        const res = await axios.get(`https://www.reddit.com/search.json?q=${encodeURIComponent(redditQuery)}&limit=25`, {
-            headers,
-            timeout: 3000
-        });
-        rawText += ' ' + JSON.stringify(res.data);
-    } catch (e) {}
-
-    // Extract emails using Regex
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    return [...new Set(rawText.match(emailRegex) || [])];
+    return [...new Set(rawContent.match(emailRegex) || [])];
 }
 
-// SCRAPE & VERIFY ENDPOINT
+// ENDPOINT: SCRAPE & VALIDATE
 app.post('/api/generate-emails', async (req, res) => {
     try {
         const { count = 10, domain = 'all' } = req.body;
         const requestedCount = Math.min(parseInt(count) || 10, 50);
 
-        // Run parallel scraping tasks for higher success rate
-        const parallelScrapes = Array.from({ length: 6 }, () => fetchRealEmails(domain));
-        const results = await Promise.all(parallelScrapes);
-        const extractedEmails = [...new Set(results.flat())];
+        // Parallel Requests for Faster Extraction
+        const parallelTasks = Array.from({ length: 5 }, () => fetchEmailsFromPublicSources(domain));
+        const results = await Promise.all(parallelTasks);
+        const extracted = [...new Set(results.flat())];
 
         let validEmails = [];
 
-        for (const email of extractedEmails) {
+        for (const rawEmail of extracted) {
             if (validEmails.length >= requestedCount) break;
 
-            const cleanEmail = email.toLowerCase().trim();
-            const emailDomain = cleanEmail.split('@')[1];
+            const email = rawEmail.toLowerCase().trim();
+            const emailDomain = email.split('@')[1];
             if (!emailDomain) continue;
 
-            // Domain Filter
             if (domain !== 'all' && emailDomain !== domain.toLowerCase()) continue;
             if (domain === 'all' && !ALLOWED_DOMAINS.includes(emailDomain)) continue;
 
-            // 1. Check DB Duplicates
-            const exists = await EmailModel.findOne({ email: cleanEmail });
+            const exists = await EmailModel.findOne({ email });
             if (exists) continue;
 
-            // 2. MX Record Validation
-            const hasValidMx = await isValidDomainFast(cleanEmail);
+            const hasValidMx = await isValidDomainFast(email);
             if (hasValidMx) {
                 try {
-                    await EmailModel.create({ email: cleanEmail, isUsed: false });
-                    validEmails.push(cleanEmail);
+                    await EmailModel.create({ email, isUsed: false });
+                    validEmails.push(email);
                 } catch (e) {
                     continue;
                 }
@@ -129,22 +122,22 @@ app.post('/api/generate-emails', async (req, res) => {
         if (validEmails.length === 0) {
             return res.json({
                 success: false,
-                error: 'No new emails matched criteria in this attempt. Click "Scrape Real Emails" again.'
+                error: 'No new emails found this round. Click "Scrape Real Emails" again.'
             });
         }
 
         res.json({
             success: true,
-            message: `Scraped and MX-verified ${validEmails.length} real emails!`,
+            message: `Scraped and saved ${validEmails.length} real MX-verified emails!`,
             emails: validEmails
         });
 
     } catch (error) {
-        res.status(500).json({ success: false, error: 'Server scraping timeout. Please try again.' });
+        res.status(500).json({ success: false, error: 'Scraping timeout occurred.' });
     }
 });
 
-// ASSIGN EMAIL ENDPOINT
+// ENDPOINT: ASSIGN DEVICE EMAIL
 app.post('/api/get-email', async (req, res) => {
     try {
         const { deviceId } = req.body;
