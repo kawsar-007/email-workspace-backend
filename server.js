@@ -1,10 +1,10 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import { faker } from '@faker-js/faker';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dns from 'dns/promises';
-import nodemailer from 'nodemailer';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,7 +23,7 @@ mongoose.connect(MONGO_URI, {
 .then(() => console.log('MongoDB Connected Successfully'))
 .catch(err => console.error('MongoDB Connection Error:', err));
 
-// Database Schema
+// Database Schema (unique: true ডুপ্লিকেট এড়াতে সাহায্য করে)
 const emailSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     isUsed: { type: Boolean, default: false, index: true },
@@ -33,90 +33,97 @@ const emailSchema = new mongoose.Schema({
 
 const EmailModel = mongoose.model('Email', emailSchema);
 
+// ২১টি অনুমোদিত ডোমেইন লিস্ট
 const ALLOWED_DOMAINS = [
-    'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com'
+    'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com',
+    'aol.com', 'protonmail.com', 'zoho.com', 'yandex.com', 'mail.com',
+    'gmx.com', 'hubspot.com', 'mailchimp.com', 'sendgrid.com', 'fastmail.com',
+    'tutanota.com', 'runbox.com', 'hushmail.com', 'lycos.com', 'zohomail.com', 'inbox.com'
 ];
 
-// SMTP Transporter Setup (Port 587 - Blocked Port 25 Bypass)
-// এখানে আপনার জিমেইল এবং App Password বসান
-const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false, // TLS
-    auth: {
-        user: process.env.SMTP_USER || "your-email@gmail.com", 
-        pass: process.env.SMTP_PASS || "your-app-password" 
-    }
-});
-
-// Port 587 / SMTP Verification Function
-async function verifyEmailSMTP(email) {
+// MX Record Check Function
+async function isValidDomain(email) {
     try {
-        // ১. বেসিক সিনট্যাক্স চেক
-        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-        if (!emailRegex.test(email)) return false;
-
-        // ২. MX Record চেক
         const domain = email.split('@')[1];
+        if (!domain) return false;
         const mxRecords = await dns.resolveMx(domain);
-        if (!mxRecords || mxRecords.length === 0) return false;
-
-        // ৩. SMTP পোর্টের মাধ্যমে ড্রাই-রান/হ্যান্ডশেক টেস্ট
-        // দ্রষ্টব্য: এটি সরাসরি আপনার নিজের জিমেইল SMTP ব্যবহার করে ভ্যালিডিটি নিশ্চিত করবে
-        return true; 
-    } catch (err) {
+        return mxRecords && mxRecords.length > 0;
+    } catch {
         return false;
     }
 }
 
-// GENERATE & VERIFY EMAILS ENDPOINT
+// Scrape Function (Search & Extract)
+async function scrapeRealEmails(keyword, domain) {
+    try {
+        const searchQuery = domain === 'all' 
+            ? `"${keyword}" "@gmail.com" OR "@yahoo.com" OR "@outlook.com" OR "@zoho.com"` 
+            : `"${keyword}" "@${domain}"`;
+
+        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
+        const { data } = await axios.get(url, {
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36' 
+            }
+        });
+
+        const $ = cheerio.load(data);
+        const textContent = $('body').text();
+        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+        
+        return [...new Set(textContent.match(emailRegex) || [])];
+    } catch (err) {
+        return [];
+    }
+}
+
+// SCRAPE & SAVE ENDPOINT
 app.post('/api/generate-emails', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({ success: false, error: 'Database is connecting. Please retry.' });
+            return res.status(503).json({ success: false, error: 'Database connecting. Retry shortly.' });
         }
 
-        const { count = 3, domain = 'all' } = req.body;
-        const requestedCount = Math.min(parseInt(count) || 3, 100);
+        const { count = 10, domain = 'all', target = 'marketing' } = req.body;
+        const requestedCount = Math.min(parseInt(count) || 10, 50);
 
-        let verifiedEmails = [];
-        let docsToInsert = [];
-        let attempts = 0;
-        const maxAttempts = requestedCount * 10;
+        const scrapedEmails = await scrapeRealEmails(target, domain);
+        let validEmailsList = [];
 
-        while (verifiedEmails.length < requestedCount && attempts < maxAttempts) {
-            attempts++;
-            let selectedDomain = domain;
-            if (domain === 'all' || !ALLOWED_DOMAINS.includes(domain)) {
-                selectedDomain = ALLOWED_DOMAINS[Math.floor(Math.random() * ALLOWED_DOMAINS.length)];
+        for (const email of scrapedEmails) {
+            if (validEmailsList.length >= requestedCount) break;
+
+            const emailDomain = email.split('@')[1];
+
+            // Domain match checking
+            if (domain !== 'all' && emailDomain !== domain) continue;
+            if (domain === 'all' && !ALLOWED_DOMAINS.includes(emailDomain)) continue;
+
+            // ১. MongoDB তে আগে সেভ করা আছে কি না চেক
+            const exists = await EmailModel.findOne({ email });
+            if (exists) continue;
+
+            // ২. MX Record চেক
+            const validMx = await isValidDomain(email);
+            if (validMx) {
+                try {
+                    await EmailModel.create({ email, isUsed: false });
+                    validEmailsList.push(email);
+                } catch (e) {
+                    continue; // Duplicate entry bypass
+                }
             }
-
-            const firstName = faker.person.firstName().toLowerCase().replace(/[^a-z0-9]/g, '');
-            const lastName = faker.person.lastName().toLowerCase().replace(/[^a-z0-9]/g, '');
-            const randomNum = Math.floor(Math.random() * 8999) + 1000;
-            const candidateEmail = `${firstName}.${lastName}${randomNum}@${selectedDomain}`;
-
-            const isValid = await verifyEmailSMTP(candidateEmail);
-
-            if (isValid) {
-                verifiedEmails.push(candidateEmail);
-                docsToInsert.push({ email: candidateEmail, isUsed: false });
-            }
-        }
-
-        if (docsToInsert.length > 0) {
-            await EmailModel.insertMany(docsToInsert, { ordered: false }).catch(() => {});
         }
 
         res.json({
             success: true,
-            message: `Successfully verified and generated ${verifiedEmails.length} emails using SMTP!`,
-            emails: verifiedEmails
+            message: `Scraped and verified ${validEmailsList.length} unique real emails!`,
+            emails: validEmailsList
         });
 
     } catch (error) {
-        console.error("Generation Error:", error);
-        res.status(500).json({ success: false, error: 'Internal Server Error' });
+        console.error("Scraping Error:", error);
+        res.status(500).json({ success: false, error: 'Scraping failed.' });
     }
 });
 
@@ -124,7 +131,7 @@ app.post('/api/generate-emails', async (req, res) => {
 app.post('/api/get-email', async (req, res) => {
     try {
         if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({ success: false, error: 'Database is connecting. Please retry.' });
+            return res.status(503).json({ success: false, error: 'Database connecting. Retry shortly.' });
         }
 
         const { deviceId } = req.body;
@@ -137,7 +144,7 @@ app.post('/api/get-email', async (req, res) => {
         ).exec();
 
         if (!assignedEmail) {
-            return res.status(404).json({ success: false, error: 'No verified emails left. Generate more.' });
+            return res.status(404).json({ success: false, error: 'No unused emails left. Scrape more.' });
         }
 
         res.json({ success: true, email: assignedEmail.email });
