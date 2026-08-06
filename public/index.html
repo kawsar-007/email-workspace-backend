@@ -22,10 +22,8 @@
 <body>
 
 <div class="container">
-    <!-- Section 1 -->
     <div class="card">
         <h2>1. Scrape Real Emails</h2>
-        <input type="text" id="targetInput" placeholder="Target keyword (e.g. marketing, crypto)" value="marketing">
         <select id="domainSelect">
             <option value="all">All Domains (21 Domains Randomly)</option>
             <option value="gmail.com">gmail.com</option>
@@ -55,7 +53,6 @@
         <div id="genStatus" class="status"></div>
     </div>
 
-    <!-- Section 2 -->
     <div class="card">
         <h2>2. Assign Email for Device</h2>
         <input type="text" id="deviceId" readonly>
@@ -66,7 +63,6 @@
 </div>
 
 <script>
-    // System Unique Device ID Generator
     function initDeviceId() {
         let devId = localStorage.getItem('device_id');
         if (!devId) {
@@ -80,7 +76,6 @@
     async function generateEmails() {
         const count = document.getElementById('emailCount').value;
         const domain = document.getElementById('domainSelect').value;
-        const target = document.getElementById('targetInput').value;
         const statusDiv = document.getElementById('genStatus');
         const scrapeBtn = document.getElementById('scrapeBtn');
 
@@ -92,7 +87,7 @@
             const res = await fetch('/api/generate-emails', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ count, domain, target })
+                body: JSON.stringify({ count, domain })
             });
             const data = await res.json();
             
