@@ -33,7 +33,7 @@ const ALLOWED_DOMAINS = [
     'tutanota.com', 'runbox.com', 'hushmail.com', 'lycos.com', 'zohomail.com', 'inbox.com'
 ];
 
-// Strict MX Record Validation (2 Seconds Timeout)
+// MX Verification
 async function isValidDomainFast(email) {
     try {
         const domain = email.split('@')[1];
@@ -47,13 +47,10 @@ async function isValidDomainFast(email) {
     }
 }
 
-// Multi-Source Real Email Fetcher
-async function fetchEmailsFromPublicSources(selectedDomain) {
+// Multi-Source Fetching
+async function fetchEmailsFromPublicSources(targetDomain) {
     let rawContent = '';
     const name = faker.person.firstName().toLowerCase();
-    const targetDomain = selectedDomain === 'all' 
-        ? ALLOWED_DOMAINS[Math.floor(Math.random() * ALLOWED_DOMAINS.length)] 
-        : selectedDomain;
 
     const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
 
@@ -80,14 +77,22 @@ async function fetchEmailsFromPublicSources(selectedDomain) {
     return [...new Set(rawContent.match(emailRegex) || [])];
 }
 
-// 1. SCRAPE & VALIDATE ENDPOINT
+// 1. SCRAPE ENDPOINT (MULTIPLE DOMAINS SUPPORT)
 app.post('/api/generate-emails', async (req, res) => {
     try {
-        const { count = 10, domain = 'all' } = req.body;
+        const { count = 10, domains = [] } = req.body;
         const requestedCount = Math.min(parseInt(count) || 10, 50);
 
-        const parallelTasks = Array.from({ length: 5 }, () => fetchEmailsFromPublicSources(domain));
-        const results = await Promise.all(parallelTasks);
+        const targetDomains = domains.length > 0 ? domains : ALLOWED_DOMAINS;
+
+        // নির্বাচিত ডোমেইনগুলোর উপর প্যারালাল স্ক্র্যাপিং
+        const tasks = [];
+        for (let i = 0; i < 5; i++) {
+            const randomDomain = targetDomains[Math.floor(Math.random() * targetDomains.length)];
+            tasks.push(fetchEmailsFromPublicSources(randomDomain));
+        }
+
+        const results = await Promise.all(tasks);
         const extracted = [...new Set(results.flat())];
 
         let validEmails = [];
@@ -99,22 +104,16 @@ app.post('/api/generate-emails', async (req, res) => {
             const emailDomain = email.split('@')[1];
             if (!emailDomain) continue;
 
-            // Strict Domain Match Check
-            if (domain !== 'all' && emailDomain !== domain.toLowerCase()) continue;
-            if (domain === 'all' && !ALLOWED_DOMAINS.includes(emailDomain)) continue;
+            // কাস্টম ফিল্টারিং
+            if (!targetDomains.includes(emailDomain)) continue;
 
             const exists = await EmailModel.findOne({ email });
             if (exists) continue;
 
-            // MX Check 1: Scrape-time Validation
             const hasValidMx = await isValidDomainFast(email);
             if (hasValidMx) {
                 try {
-                    await EmailModel.create({ 
-                        email, 
-                        domain: emailDomain, 
-                        isUsed: false 
-                    });
+                    await EmailModel.create({ email, domain: emailDomain, isUsed: false });
                     validEmails.push(email);
                 } catch (e) {
                     continue;
@@ -125,13 +124,13 @@ app.post('/api/generate-emails', async (req, res) => {
         if (validEmails.length === 0) {
             return res.json({
                 success: false,
-                error: 'No new emails matched criteria. Click "Scrape Real Emails" again.'
+                error: 'No new emails matched selected domains. Try again.'
             });
         }
 
         res.json({
             success: true,
-            message: `Scraped and saved ${validEmails.length} real MX-verified emails!`,
+            message: `Scraped and saved ${validEmails.length} MX-verified emails!`,
             emails: validEmails
         });
 
@@ -140,37 +139,28 @@ app.post('/api/generate-emails', async (req, res) => {
     }
 });
 
-// 2. ASSIGN DEVICE EMAIL ENDPOINT (WITH DOMAIN FILTER & RE-VERIFICATION)
+// 2. ASSIGN ENDPOINT
 app.post('/api/get-email', async (req, res) => {
     try {
-        const { deviceId, domain = 'all' } = req.body;
+        const { deviceId, domains = [] } = req.body;
         if (!deviceId) return res.status(400).json({ success: false, error: 'Device ID required.' });
 
-        // Build domain filter query
         const query = { isUsed: false };
-        if (domain !== 'all') {
-            query.domain = domain.toLowerCase();
+        if (domains.length > 0) {
+            query.domain = { $in: domains };
         }
 
-        // Find unused candidates
         const candidates = await EmailModel.find(query).limit(10);
 
         if (candidates.length === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                error: domain !== 'all' 
-                    ? `No fresh "${domain}" emails in DB. Scrape "${domain}" first.` 
-                    : 'No fresh emails in DB. Scrape more first.' 
-            });
+            return res.status(404).json({ success: false, error: 'No fresh emails for selected domains. Scrape first.' });
         }
 
         let assignedEmailDoc = null;
 
-        // MX Check 2: Assign-time Re-Validation
         for (const doc of candidates) {
             const isMxValid = await isValidDomainFast(doc.email);
             if (isMxValid) {
-                // Mark as used for this device
                 assignedEmailDoc = await EmailModel.findOneAndUpdate(
                     { _id: doc._id, isUsed: false },
                     { $set: { isUsed: true, assignedDevice: deviceId.trim() } },
@@ -178,13 +168,12 @@ app.post('/api/get-email', async (req, res) => {
                 );
                 if (assignedEmailDoc) break;
             } else {
-                // Remove invalid email from DB
                 await EmailModel.deleteOne({ _id: doc._id });
             }
         }
 
         if (!assignedEmailDoc) {
-            return res.status(404).json({ success: false, error: 'Selected emails failed MX verification. Please scrape again.' });
+            return res.status(404).json({ success: false, error: 'Selected emails failed MX check. Scrape again.' });
         }
 
         res.json({ success: true, email: assignedEmailDoc.email });
