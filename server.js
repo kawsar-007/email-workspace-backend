@@ -33,13 +33,13 @@ const ALLOWED_DOMAINS = [
     'tutanota.com', 'runbox.com', 'hushmail.com', 'lycos.com', 'zohomail.com', 'inbox.com'
 ];
 
-// Fast MX Check with 1.5s Timeout
+// Fast MX Record Check
 async function isValidDomainFast(email) {
     try {
         const domain = email.split('@')[1];
         if (!domain) return false;
         const mxPromise = dns.resolveMx(domain);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1500));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000));
         const mxRecords = await Promise.race([mxPromise, timeoutPromise]);
         return mxRecords && mxRecords.length > 0;
     } catch {
@@ -47,86 +47,100 @@ async function isValidDomainFast(email) {
     }
 }
 
-// Single Scraping Task with Faker.js
-async function scrapeBatchWithFaker(selectedDomain) {
-    let allText = '';
-    const fakeName = faker.person.fullName();
+// Scrape Emails via Multiple Sources
+async function fetchRealEmails(selectedDomain) {
+    let rawText = '';
+    const firstName = faker.person.firstName();
     const targetDomain = selectedDomain === 'all' 
         ? ALLOWED_DOMAINS[Math.floor(Math.random() * ALLOWED_DOMAINS.length)] 
         : selectedDomain;
-    
-    const query = `"${fakeName}" "@${targetDomain}"`;
+
     const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36'
     };
 
+    // Source 1: DuckDuckGo Lite (Optimized Query)
     try {
+        const query = `${firstName} ${targetDomain}`;
         const params = new URLSearchParams({ q: query });
         const { data } = await axios.post('https://lite.duckduckgo.com/lite/', params.toString(), {
             headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
-            timeout: 2500
+            timeout: 3000
         });
         const $ = cheerio.load(data);
-        allText += ' ' + $('body').text();
+        rawText += ' ' + $('body').text();
     } catch (e) {}
 
+    // Source 2: Reddit Public API (High Yield Fallback)
+    try {
+        const redditQuery = `${firstName} ${targetDomain}`;
+        const res = await axios.get(`https://www.reddit.com/search.json?q=${encodeURIComponent(redditQuery)}&limit=25`, {
+            headers,
+            timeout: 3000
+        });
+        rawText += ' ' + JSON.stringify(res.data);
+    } catch (e) {}
+
+    // Extract emails using Regex
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    return [...new Set(allText.match(emailRegex) || [])];
+    return [...new Set(rawText.match(emailRegex) || [])];
 }
 
-// FAST SCRAPE & SAVE ENDPOINT
+// SCRAPE & VERIFY ENDPOINT
 app.post('/api/generate-emails', async (req, res) => {
     try {
         const { count = 10, domain = 'all' } = req.body;
         const requestedCount = Math.min(parseInt(count) || 10, 50);
 
-        // ৫টি Faker নাম তৈরি করে প্যারালাল স্ক্র্যাপ রান করা (দ্রুত রেসপন্সের জন্য)
-        const parallelTasks = Array.from({ length: 5 }, () => scrapeBatchWithFaker(domain));
-        const resultsArray = await Promise.all(parallelTasks);
-        const scraped = [...new Set(resultsArray.flat())];
+        // Run parallel scraping tasks for higher success rate
+        const parallelScrapes = Array.from({ length: 6 }, () => fetchRealEmails(domain));
+        const results = await Promise.all(parallelScrapes);
+        const extractedEmails = [...new Set(results.flat())];
 
-        let validEmailsList = [];
+        let validEmails = [];
 
-        for (const email of scraped) {
-            if (validEmailsList.length >= requestedCount) break;
+        for (const email of extractedEmails) {
+            if (validEmails.length >= requestedCount) break;
 
-            const emailDomain = email.split('@')[1]?.toLowerCase();
+            const cleanEmail = email.toLowerCase().trim();
+            const emailDomain = cleanEmail.split('@')[1];
             if (!emailDomain) continue;
 
+            // Domain Filter
             if (domain !== 'all' && emailDomain !== domain.toLowerCase()) continue;
             if (domain === 'all' && !ALLOWED_DOMAINS.includes(emailDomain)) continue;
 
-            // ১. ডুপ্লিকেট চেক
-            const exists = await EmailModel.findOne({ email });
+            // 1. Check DB Duplicates
+            const exists = await EmailModel.findOne({ email: cleanEmail });
             if (exists) continue;
 
-            // ২. MX ভ্যালিডেশন
-            const isValidMx = await isValidDomainFast(email);
-            if (isValidMx) {
+            // 2. MX Record Validation
+            const hasValidMx = await isValidDomainFast(cleanEmail);
+            if (hasValidMx) {
                 try {
-                    await EmailModel.create({ email, isUsed: false });
-                    validEmailsList.push(email);
+                    await EmailModel.create({ email: cleanEmail, isUsed: false });
+                    validEmails.push(cleanEmail);
                 } catch (e) {
                     continue;
                 }
             }
         }
 
-        if (validEmailsList.length === 0) {
+        if (validEmails.length === 0) {
             return res.json({
                 success: false,
-                error: 'No valid emails scraped in this round. Please click "Scrape Real Emails" again.'
+                error: 'No new emails matched criteria in this attempt. Click "Scrape Real Emails" again.'
             });
         }
 
         res.json({
             success: true,
-            message: `Scraped & MX-verified ${validEmailsList.length} real emails using Faker!`,
-            emails: validEmailsList
+            message: `Scraped and MX-verified ${validEmails.length} real emails!`,
+            emails: validEmails
         });
 
     } catch (error) {
-        res.status(500).json({ success: false, error: 'Scraping process timed out.' });
+        res.status(500).json({ success: false, error: 'Server scraping timeout. Please try again.' });
     }
 });
 
