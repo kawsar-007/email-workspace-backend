@@ -15,25 +15,17 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // MongoDB Connection
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://user:pass@cluster.mongodb.net/emaildb";
+mongoose.connect(MONGO_URI).catch(err => console.error(err));
 
-mongoose.connect(MONGO_URI, {
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
-})
-.then(() => console.log('MongoDB Connected Successfully'))
-.catch(err => console.error('MongoDB Connection Error:', err));
-
-// Database Schema (unique: true ডুপ্লিকেট এড়াতে সাহায্য করে)
+// Database Schema
 const emailSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     isUsed: { type: Boolean, default: false, index: true },
     assignedDevice: { type: String, default: null },
     createdAt: { type: Date, default: Date.now }
 });
-
 const EmailModel = mongoose.model('Email', emailSchema);
 
-// ২১টি অনুমোদিত ডোমেইন লিস্ট
 const ALLOWED_DOMAINS = [
     'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com',
     'aol.com', 'protonmail.com', 'zoho.com', 'yandex.com', 'mail.com',
@@ -41,30 +33,31 @@ const ALLOWED_DOMAINS = [
     'tutanota.com', 'runbox.com', 'hushmail.com', 'lycos.com', 'zohomail.com', 'inbox.com'
 ];
 
-// MX Record Check Function
-async function isValidDomain(email) {
+// Fast MX Check with Timeout
+async function isValidDomainFast(email) {
     try {
         const domain = email.split('@')[1];
         if (!domain) return false;
-        const mxRecords = await dns.resolveMx(domain);
+        const mxPromise = dns.resolveMx(domain);
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000));
+        const mxRecords = await Promise.race([mxPromise, timeoutPromise]);
         return mxRecords && mxRecords.length > 0;
     } catch {
         return false;
     }
 }
 
-// Scrape Function (Search & Extract)
+// Optimized Scrape Function
 async function scrapeRealEmails(keyword, domain) {
     try {
         const searchQuery = domain === 'all' 
-            ? `"${keyword}" "@gmail.com" OR "@yahoo.com" OR "@outlook.com" OR "@zoho.com"` 
+            ? `"${keyword}" "@gmail.com" OR "@yahoo.com" OR "@outlook.com"` 
             : `"${keyword}" "@${domain}"`;
 
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
         const { data } = await axios.get(url, {
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36' 
-            }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+            timeout: 4000 // 4 seconds max timeout
         });
 
         const $ = cheerio.load(data);
@@ -77,63 +70,59 @@ async function scrapeRealEmails(keyword, domain) {
     }
 }
 
-// SCRAPE & SAVE ENDPOINT
+// FAST SCRAPE & SAVE ENDPOINT
 app.post('/api/generate-emails', async (req, res) => {
     try {
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({ success: false, error: 'Database connecting. Retry shortly.' });
-        }
-
         const { count = 10, domain = 'all', target = 'marketing' } = req.body;
         const requestedCount = Math.min(parseInt(count) || 10, 50);
 
         const scrapedEmails = await scrapeRealEmails(target, domain);
-        let validEmailsList = [];
+        if (scrapedEmails.length === 0) {
+            return res.json({ success: false, error: 'No emails found for this target. Try another keyword.' });
+        }
 
-        for (const email of scrapedEmails) {
-            if (validEmailsList.length >= requestedCount) break;
-
+        // ১. একবারে ডোমেইন ফিল্টারিং
+        const filteredCandidateEmails = scrapedEmails.filter(email => {
             const emailDomain = email.split('@')[1];
+            if (domain !== 'all') return emailDomain === domain;
+            return ALLOWED_DOMAINS.includes(emailDomain);
+        });
 
-            // Domain match checking
-            if (domain !== 'all' && emailDomain !== domain) continue;
-            if (domain === 'all' && !ALLOWED_DOMAINS.includes(emailDomain)) continue;
+        // ২. ডাটাবেসে একসাথে ডুপ্লিকেট চেক (Bulk Query)
+        const existingDocs = await EmailModel.find({ email: { $in: filteredCandidateEmails } }).select('email');
+        const existingEmails = new Set(existingDocs.map(d => d.email));
+        const freshEmails = filteredCandidateEmails.filter(e => !existingEmails.has(e));
 
-            // ১. MongoDB তে আগে সেভ করা আছে কি না চেক
-            const exists = await EmailModel.findOne({ email });
-            if (exists) continue;
+        // ৩. প্যারালাল MX ভ্যালিডেশন (Parallel Verification)
+        const verificationResults = await Promise.all(
+            freshEmails.map(async (email) => {
+                const valid = await isValidDomainFast(email);
+                return valid ? email : null;
+            })
+        );
 
-            // ২. MX Record চেক
-            const validMx = await isValidDomain(email);
-            if (validMx) {
-                try {
-                    await EmailModel.create({ email, isUsed: false });
-                    validEmailsList.push(email);
-                } catch (e) {
-                    continue; // Duplicate entry bypass
-                }
-            }
+        const validEmailsList = verificationResults.filter(Boolean).slice(0, requestedCount);
+
+        // ৪. ডাটাবেসে ইনসার্ট
+        if (validEmailsList.length > 0) {
+            const docsToInsert = validEmailsList.map(email => ({ email, isUsed: false }));
+            await EmailModel.insertMany(docsToInsert, { ordered: false }).catch(() => {});
         }
 
         res.json({
             success: true,
-            message: `Scraped and verified ${validEmailsList.length} unique real emails!`,
+            message: `Scraped and saved ${validEmailsList.length} unique real emails!`,
             emails: validEmailsList
         });
 
     } catch (error) {
-        console.error("Scraping Error:", error);
-        res.status(500).json({ success: false, error: 'Scraping failed.' });
+        res.status(500).json({ success: false, error: 'Scraping process failed.' });
     }
 });
 
 // ASSIGN EMAIL ENDPOINT
 app.post('/api/get-email', async (req, res) => {
     try {
-        if (mongoose.connection.readyState !== 1) {
-            return res.status(503).json({ success: false, error: 'Database connecting. Retry shortly.' });
-        }
-
         const { deviceId } = req.body;
         if (!deviceId) return res.status(400).json({ success: false, error: 'Device ID required.' });
 
@@ -144,7 +133,7 @@ app.post('/api/get-email', async (req, res) => {
         ).exec();
 
         if (!assignedEmail) {
-            return res.status(404).json({ success: false, error: 'No unused emails left. Scrape more.' });
+            return res.status(404).json({ success: false, error: 'No fresh emails left. Please scrape more.' });
         }
 
         res.json({ success: true, email: assignedEmail.email });
