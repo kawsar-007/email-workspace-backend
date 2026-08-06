@@ -8,11 +8,12 @@
         body { font-family: Arial, sans-serif; background: #f0f2f5; display: flex; justify-content: center; padding: 40px; }
         .card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 420px; margin-bottom: 20px; }
         input, select, button { width: 100%; padding: 12px; margin-top: 10px; border-radius: 6px; border: 1px solid #ccc; box-sizing: border-box; }
-        button { cursor: pointer; font-weight: bold; }
+        button { cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
         .btn-green { background: #138852; color: white; border: none; }
         .btn-blue { background: #0066ff; color: white; border: none; }
         .btn-copy { background: #4a5568; color: white; border: none; margin-top: 8px; }
-        .status { margin-top: 15px; padding: 12px; border-radius: 6px; display: none; text-align: center; }
+        .status { margin-top: 15px; padding: 12px; border-radius: 6px; display: none; text-align: center; font-size: 14px; }
         .status.success { background: #d1e7dd; color: #0f5132; display: block; }
         .status.error { background: #f8d7da; color: #842029; display: block; }
         .email-display { font-weight: bold; word-break: break-all; }
@@ -47,33 +48,36 @@
                 <option value="rocketmail.com">rocketmail.com</option>
                 <option value="cox.net">cox.net</option>
             </select>
-            <button class="btn-green" onclick="generateEmails()">Generate Emails</button>
+            <button id="genBtn" class="btn-green" onclick="generateEmails()">Generate Emails</button>
             <div id="genStatus" class="status"></div>
         </div>
 
         <div class="card">
             <h3>2. Assign Email for Device</h3>
             <input type="text" id="deviceId" readonly>
-            <button class="btn-blue" onclick="getEmail()">Get New Email</button>
+            <button id="getBtn" class="btn-blue" onclick="getEmail()">Get New Email</button>
             <div id="assignStatus" class="status"></div>
             <button id="copyBtn" class="btn-copy" style="display:none;" onclick="copyToClipboard()">Copy Email</button>
         </div>
     </div>
 
     <script>
-        let deviceId = localStorage.getItem('device_id');
-        if (!deviceId) {
-            deviceId = 'DEV-' + Math.random().toString(36).substring(2, 10).toUpperCase() + '-' + Date.now();
-            localStorage.setItem('device_id', deviceId);
+        let rawDeviceId = localStorage.getItem('device_id');
+        if (!rawDeviceId) {
+            rawDeviceId = 'DEV-' + Math.random().toString(36).substring(2, 10).toUpperCase() + '-' + Date.now();
+            localStorage.setItem('device_id', rawDeviceId);
         }
-        document.getElementById('deviceId').value = `Device ID: ${deviceId}`;
+        document.getElementById('deviceId').value = `Device ID: ${rawDeviceId}`;
 
         let currentAssignedEmail = '';
 
         async function generateEmails() {
             const statusDiv = document.getElementById('genStatus');
+            const genBtn = document.getElementById('genBtn');
+
+            genBtn.disabled = true;
             statusDiv.className = 'status';
-            statusDiv.innerText = 'Verifying and Generating...';
+            statusDiv.innerText = 'Validating MX Records & Generating...';
             statusDiv.style.display = 'block';
 
             const count = document.getElementById('count').value;
@@ -96,12 +100,17 @@
             } catch (err) {
                 statusDiv.className = 'status error';
                 statusDiv.innerText = 'Server error. Please retry.';
+            } finally {
+                genBtn.disabled = false;
             }
         }
 
         async function getEmail() {
             const statusDiv = document.getElementById('assignStatus');
+            const getBtn = document.getElementById('getBtn');
             const copyBtn = document.getElementById('copyBtn');
+
+            getBtn.disabled = true;
             statusDiv.className = 'status';
             statusDiv.innerText = 'Fetching...';
             statusDiv.style.display = 'block';
@@ -110,7 +119,7 @@
                 const res = await fetch('/api/get-email', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ deviceId })
+                    body: JSON.stringify({ deviceId: rawDeviceId })
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -128,6 +137,8 @@
                 statusDiv.className = 'status error';
                 statusDiv.innerText = 'Connection error.';
                 copyBtn.style.display = 'none';
+            } finally {
+                getBtn.disabled = false;
             }
         }
 

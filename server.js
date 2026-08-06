@@ -4,7 +4,6 @@ import { faker } from '@faker-js/faker';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dns from 'dns/promises';
-import net from 'net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,49 +39,21 @@ const ALLOWED_DOMAINS = [
     'verizon.net', 'att.net', 'me.com', 'mac.com', 'rocketmail.com', 'cox.net'
 ];
 
-// SMTP Ping Function: Checks if the inbox actually exists
-function verifyEmailSMTP(email, domain) {
-    return new Promise(async (resolve) => {
-        try {
-            const mxRecords = await dns.resolveMx(domain);
-            if (!mxRecords || mxRecords.length === 0) return resolve(false);
+// Port 25 ছাড়া DNS MX Record এবং Syntax Check
+async function verifyEmailWithoutPort25(email, domain) {
+    try {
+        // ১. বেসিক সিনট্যাক্স ভ্যালিডেশন
+        const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+        if (!emailRegex.test(email)) return false;
 
-            const exchange = mxRecords.sort((a, b) => a.priority - b.priority)[0].exchange;
-            const socket = net.createConnection(25, exchange);
+        // ২. DNS Lookups (MX Records চেক)
+        const mxRecords = await dns.resolveMx(domain);
+        if (!mxRecords || mxRecords.length === 0) return false;
 
-            let isReal = false;
-            let step = 0;
-
-            socket.setTimeout(4000); // 4 seconds timeout
-
-            socket.on('data', (data) => {
-                const response = data.toString();
-                if (step === 0 && response.startsWith('220')) {
-                    socket.write(`EHLO check.com\r\n`);
-                    step++;
-                } else if (step === 1 && response.startsWith('250')) {
-                    socket.write(`MAIL FROM:<test@check.com>\r\n`);
-                    step++;
-                } else if (step === 2 && response.startsWith('250')) {
-                    socket.write(`RCPT TO:<${email}>\r\n`);
-                    step++;
-                } else if (step === 3) {
-                    if (response.startsWith('250')) {
-                        isReal = true;
-                    }
-                    socket.write(`QUIT\r\n`);
-                    socket.end();
-                }
-            });
-
-            socket.on('error', () => { socket.destroy(); resolve(false); });
-            socket.on('timeout', () => { socket.destroy(); resolve(false); });
-            socket.on('close', () => resolve(isReal));
-
-        } catch (err) {
-            resolve(false);
-        }
-    });
+        return true; // MX রেকর্ড ঠিক থাকলে ডোমেইন এবং ইমেইল সার্ভার একটিভ
+    } catch (err) {
+        return false;
+    }
 }
 
 // GENERATE & VERIFY EMAILS ENDPOINT
@@ -98,7 +69,7 @@ app.post('/api/generate-emails', async (req, res) => {
         let verifiedEmails = [];
         let docsToInsert = [];
         let attempts = 0;
-        const maxAttempts = requestedCount * 5;
+        const maxAttempts = requestedCount * 10;
 
         while (verifiedEmails.length < requestedCount && attempts < maxAttempts) {
             attempts++;
@@ -112,9 +83,10 @@ app.post('/api/generate-emails', async (req, res) => {
             const randomNum = Math.floor(Math.random() * 8999) + 1000;
             const candidateEmail = `${firstName}.${lastName}${randomNum}@${selectedDomain}`;
 
-            const isValidInbox = await verifyEmailSMTP(candidateEmail, selectedDomain);
+            // Port 25 ছাড়া ভ্যালিডেশন
+            const isValid = await verifyEmailWithoutPort25(candidateEmail, selectedDomain);
 
-            if (isValidInbox) {
+            if (isValid) {
                 verifiedEmails.push(candidateEmail);
                 docsToInsert.push({ email: candidateEmail, isUsed: false });
             }
