@@ -5,42 +5,157 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Email Manager Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f7f6; margin: 0; padding: 40px 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 20px; }
-        .card { background: #ffffff; padding: 24px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; width: 100%; box-sizing: border-box; }
-        h2 { margin-top: 0; margin-bottom: 12px; font-size: 1.25rem; color: #1e293b; font-weight: 700; }
-        label { font-size: 0.9rem; font-weight: 600; color: #475569; margin-bottom: 6px; display: block; }
-        
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card {
+            background: #ffffff;
+            padding: 24px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        h2 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            font-size: 1.25rem;
+            color: #1e293b;
+            font-weight: 700;
+        }
+
+        label.section-label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .select-all-btn {
+            font-size: 0.8rem;
+            color: #0066ff;
+            cursor: pointer;
+            text-decoration: underline;
+            user-select: none;
+        }
+
         .domain-box {
-            max-height: 140px;
+            max-height: 180px;
             overflow-y: auto;
             border: 1px solid #cbd5e1;
-            padding: 10px;
+            padding: 10px 12px;
             border-radius: 6px;
             background: #fafafa;
             margin-bottom: 12px;
         }
-        .domain-item { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; margin-bottom: 6px; cursor: pointer; }
-        .domain-item input { width: auto; margin: 0; }
 
-        input[type="number"], input[type="text"], button { width: 100%; padding: 12px; margin-top: 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.95rem; box-sizing: border-box; outline: none; }
-        button { border: none; color: #ffffff; cursor: pointer; font-weight: 600; }
+        .domain-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+            margin-bottom: 6px;
+            cursor: pointer;
+            color: #334155;
+        }
+
+        .domain-item input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        input[type="number"], input[type="text"], button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 8px;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            font-size: 0.95rem;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        input[readonly] {
+            background-color: #f8fafc;
+            color: #334155;
+        }
+
+        button {
+            border: none;
+            color: #ffffff;
+            cursor: pointer;
+            font-weight: 600;
+            transition: opacity 0.2s ease;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+
         .btn-green { background-color: #13834b; }
         .btn-blue { background-color: #0066ff; }
         .btn-gray { background-color: #4b5563; }
-        .status { margin-top: 12px; padding: 12px; border-radius: 6px; display: none; font-size: 0.9rem; font-weight: 600; text-align: center; }
-        .status.success { background-color: #d1e7dd; color: #0f5132; display: block; }
-        .status.error { background-color: #f8d7da; color: #842029; display: block; }
+
+        .status {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 6px;
+            display: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .status.success {
+            background-color: #d1e7dd;
+            color: #0f5132;
+            border: 1px solid #badbcc;
+            display: block;
+        }
+
+        .status.error {
+            background-color: #f8d7da;
+            color: #842029;
+            border: 1px solid #f5c2c7;
+            display: block;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
+    <!-- Section 1: Scrape Emails -->
     <div class="card">
         <h2>1. Scrape Real Emails</h2>
         
-        <label>Select Domains (Choose Multiple):</label>
-        <div class="domain-box">
+        <label class="section-label">
+            <span>Select Domains:</span>
+            <span class="select-all-btn" onclick="toggleSelectAll()">Select All / Deselect All</span>
+        </label>
+
+        <!-- All 21 Domains Multi-Select Box -->
+        <div class="domain-box" id="domainList">
             <label class="domain-item"><input type="checkbox" value="gmail.com" checked> gmail.com</label>
             <label class="domain-item"><input type="checkbox" value="yahoo.com" checked> yahoo.com</label>
             <label class="domain-item"><input type="checkbox" value="outlook.com" checked> outlook.com</label>
@@ -49,7 +164,19 @@
             <label class="domain-item"><input type="checkbox" value="aol.com"> aol.com</label>
             <label class="domain-item"><input type="checkbox" value="protonmail.com"> protonmail.com</label>
             <label class="domain-item"><input type="checkbox" value="zoho.com"> zoho.com</label>
+            <label class="domain-item"><input type="checkbox" value="yandex.com"> yandex.com</label>
             <label class="domain-item"><input type="checkbox" value="mail.com"> mail.com</label>
+            <label class="domain-item"><input type="checkbox" value="gmx.com"> gmx.com</label>
+            <label class="domain-item"><input type="checkbox" value="hubspot.com"> hubspot.com</label>
+            <label class="domain-item"><input type="checkbox" value="mailchimp.com"> mailchimp.com</label>
+            <label class="domain-item"><input type="checkbox" value="sendgrid.com"> sendgrid.com</label>
+            <label class="domain-item"><input type="checkbox" value="fastmail.com"> fastmail.com</label>
+            <label class="domain-item"><input type="checkbox" value="tutanota.com"> tutanota.com</label>
+            <label class="domain-item"><input type="checkbox" value="runbox.com"> runbox.com</label>
+            <label class="domain-item"><input type="checkbox" value="hushmail.com"> hushmail.com</label>
+            <label class="domain-item"><input type="checkbox" value="lycos.com"> lycos.com</label>
+            <label class="domain-item"><input type="checkbox" value="zohomail.com"> zohomail.com</label>
+            <label class="domain-item"><input type="checkbox" value="inbox.com"> inbox.com</label>
         </div>
 
         <input type="number" id="emailCount" value="10" min="1" max="50">
@@ -58,8 +185,10 @@
         <div id="genStatus" class="status"></div>
     </div>
 
+    <!-- Section 2: Assign Email -->
     <div class="card">
         <h2>2. Assign Email for Device</h2>
+        
         <input type="text" id="deviceId" readonly>
         <button class="btn-blue" onclick="getNewEmail()">Get New Email</button>
         <div id="assignedEmailStatus" class="status"></div>
@@ -78,8 +207,15 @@
     }
     initDeviceId();
 
+    let allSelected = false;
+    function toggleSelectAll() {
+        allSelected = !allSelected;
+        const checkboxes = document.querySelectorAll('#domainList input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = allSelected);
+    }
+
     function getSelectedDomains() {
-        const checkboxes = document.querySelectorAll('.domain-box input[type="checkbox"]:checked');
+        const checkboxes = document.querySelectorAll('#domainList input[type="checkbox"]:checked');
         return Array.from(checkboxes).map(cb => cb.value);
     }
 
@@ -88,6 +224,12 @@
         const domains = getSelectedDomains();
         const statusDiv = document.getElementById('genStatus');
         const scrapeBtn = document.getElementById('scrapeBtn');
+
+        if (domains.length === 0) {
+            statusDiv.className = 'status error';
+            statusDiv.innerText = 'Please select at least one domain.';
+            return;
+        }
 
         scrapeBtn.disabled = true;
         scrapeBtn.innerText = "Scraping...";
@@ -140,7 +282,7 @@
             }
         } catch (e) {
             statusDiv.className = 'status error';
-            statusDiv.innerText = 'Server error.';
+            statusDiv.innerText = 'Server error occurred.';
         }
     }
 
