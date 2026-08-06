@@ -17,7 +17,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://user:pass@cluster.mongodb.net/emaildb";
 mongoose.connect(MONGO_URI).catch(err => console.error('MongoDB Error:', err));
 
-// Database Schema
 const emailSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     isUsed: { type: Boolean, default: false, index: true },
@@ -33,7 +32,7 @@ const ALLOWED_DOMAINS = [
     'tutanota.com', 'runbox.com', 'hushmail.com', 'lycos.com', 'zohomail.com', 'inbox.com'
 ];
 
-// MX Check
+// MX Validation
 async function isValidDomainFast(email) {
     try {
         const domain = email.split('@')[1];
@@ -47,48 +46,47 @@ async function isValidDomainFast(email) {
     }
 }
 
-// Improved Multi-Engine Scraper (Bing + DuckDuckGo)
+// Advanced Scraper (DDG Lite + Reddit Public API)
 async function scrapeRealEmails(keyword, selectedDomain) {
-    let allExtracted = [];
-
-    // Simple search queries (Strict boolean format removed to avoid 0 results)
+    let allText = '';
     const targetDomain = selectedDomain === 'all' ? 'gmail.com' : selectedDomain;
     const query = `${keyword} @${targetDomain}`;
 
     const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     };
 
-    // Engine 1: DuckDuckGo HTML
+    // Source 1: DuckDuckGo Lite (Less Bot Blocking)
     try {
-        const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-        const { data } = await axios.get(ddgUrl, { headers, timeout: 5000 });
+        const params = new URLSearchParams();
+        params.append('q', query);
+        const { data } = await axios.post('https://lite.duckduckgo.com/lite/', params.toString(), {
+            headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+            timeout: 5000
+        });
         const $ = cheerio.load(data);
-        const text = $('body').text();
-        const found = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-        allExtracted.push(...found);
+        allText += ' ' + $('body').text();
     } catch (e) {
-        console.log('DuckDuckGo Scrape bypassed or timed out.');
+        console.log('DDG Lite Engine Bypassed.');
     }
 
-    // Engine 2: Bing Search Fallback
+    // Source 2: Reddit Public Posts Search API
     try {
-        const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}`;
-        const { data } = await axios.get(bingUrl, { headers, timeout: 5000 });
-        const $ = cheerio.load(data);
-        const text = $('body').text();
-        const found = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-        allExtracted.push(...found);
+        const redditUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&limit=50`;
+        const { data } = await axios.get(redditUrl, { headers, timeout: 5000 });
+        allText += ' ' + JSON.stringify(data);
     } catch (e) {
-        console.log('Bing Scrape bypassed or timed out.');
+        console.log('Reddit Source Bypassed.');
     }
 
-    // Cleanup & Distinct list
-    return [...new Set(allExtracted)];
+    // Email Extractor
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const extracted = allText.match(emailRegex) || [];
+
+    return [...new Set(extracted)];
 }
 
-// ENDPOINT
+// SCRAPE & SAVE ENDPOINT
 app.post('/api/generate-emails', async (req, res) => {
     try {
         const { count = 10, domain = 'all', target = 'marketing' } = req.body;
@@ -99,11 +97,11 @@ app.post('/api/generate-emails', async (req, res) => {
         if (scrapedEmails.length === 0) {
             return res.json({ 
                 success: false, 
-                error: 'No emails found right now. Try keywords like "crypto", "business", "contact", or select a specific domain like "gmail.com".' 
+                error: 'No emails scraped. Try broader terms like "business", "crypto", "contact", or "support".' 
             });
         }
 
-        // 1. Domain Match Filtering
+        // Domain Match Filtering
         const filteredCandidateEmails = scrapedEmails.filter(email => {
             const emailDomain = email.split('@')[1]?.toLowerCase();
             if (!emailDomain) return false;
@@ -114,16 +112,16 @@ app.post('/api/generate-emails', async (req, res) => {
         if (filteredCandidateEmails.length === 0) {
             return res.json({ 
                 success: false, 
-                error: 'Emails were scraped, but none matched your domain filter. Try selecting "gmail.com" or "All Domains".' 
+                error: 'Emails found, but none matched the selected domain filter. Select "All Domains" or "gmail.com".' 
             });
         }
 
-        // 2. Check Existing Database Emails
+        // DB Existing Check
         const existingDocs = await EmailModel.find({ email: { $in: filteredCandidateEmails } }).select('email');
         const existingEmails = new Set(existingDocs.map(d => d.email));
         const freshEmails = filteredCandidateEmails.filter(e => !existingEmails.has(e));
 
-        // 3. Parallel MX Verification
+        // MX Record Verification
         const verificationResults = await Promise.all(
             freshEmails.map(async (email) => {
                 const valid = await isValidDomainFast(email);
@@ -133,22 +131,20 @@ app.post('/api/generate-emails', async (req, res) => {
 
         const validEmailsList = verificationResults.filter(Boolean).slice(0, requestedCount);
 
-        // 4. Bulk Save
         if (validEmailsList.length > 0) {
             const docsToInsert = validEmailsList.map(email => ({ email, isUsed: false }));
             await EmailModel.insertMany(docsToInsert, { ordered: false }).catch(() => {});
         } else {
-            return res.json({ success: false, error: 'Emails found were either duplicates or invalid MX domains. Try again.' });
+            return res.json({ success: false, error: 'Scraped emails were duplicates or had invalid MX records.' });
         }
 
         res.json({
             success: true,
-            message: `Scraped & verified ${validEmailsList.length} real unique emails!`,
+            message: `Scraped and saved ${validEmailsList.length} real emails!`,
             emails: validEmailsList
         });
 
     } catch (error) {
-        console.error(error);
         res.status(500).json({ success: false, error: 'Internal scraping error.' });
     }
 });
@@ -166,7 +162,7 @@ app.post('/api/get-email', async (req, res) => {
         ).exec();
 
         if (!assignedEmail) {
-            return res.status(404).json({ success: false, error: 'No fresh emails in DB. Scrape first.' });
+            return res.status(404).json({ success: false, error: 'No fresh emails in DB. Scrape more.' });
         }
 
         res.json({ success: true, email: assignedEmail.email });
