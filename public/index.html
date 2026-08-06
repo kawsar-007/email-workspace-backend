@@ -146,4 +146,258 @@
 </script>
 
 </body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Manager Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card {
+            background: #ffffff;
+            padding: 24px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e2e8f0;
+        }
+
+        h2 {
+            margin-top: 0;
+            margin-bottom: 16px;
+            font-size: 1.25rem;
+            color: #1e293b;
+            font-weight: 700;
+        }
+
+        input, select, button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            font-size: 0.95rem;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: #0066ff;
+        }
+
+        input[readonly] {
+            background-color: #f8fafc;
+            color: #334155;
+        }
+
+        button {
+            border: none;
+            color: #ffffff;
+            cursor: pointer;
+            font-weight: 600;
+            transition: opacity 0.2s ease;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-green {
+            background-color: #13834b;
+        }
+
+        .btn-blue {
+            background-color: #0066ff;
+        }
+
+        .btn-gray {
+            background-color: #4b5563;
+        }
+
+        .status {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 6px;
+            display: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .status.success {
+            background-color: #d1e7dd;
+            color: #0f5132;
+            border: 1px solid #badbcc;
+            display: block;
+        }
+
+        .status.error {
+            background-color: #f8d7da;
+            color: #842029;
+            border: 1px solid #f5c2c7;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Section 1: Scrape Emails -->
+    <div class="card">
+        <h2>1. Scrape Real Emails</h2>
+        
+        <select id="domainSelect">
+            <option value="all">All Domains (21 Domains Randomly)</option>
+            <option value="gmail.com">gmail.com</option>
+            <option value="yahoo.com">yahoo.com</option>
+            <option value="outlook.com">outlook.com</option>
+            <option value="hotmail.com">hotmail.com</option>
+            <option value="icloud.com">icloud.com</option>
+            <option value="aol.com">aol.com</option>
+            <option value="protonmail.com">protonmail.com</option>
+            <option value="zoho.com">zoho.com</option>
+            <option value="yandex.com">yandex.com</option>
+            <option value="mail.com">mail.com</option>
+            <option value="gmx.com">gmx.com</option>
+            <option value="hubspot.com">hubspot.com</option>
+            <option value="mailchimp.com">mailchimp.com</option>
+            <option value="sendgrid.com">sendgrid.com</option>
+            <option value="fastmail.com">fastmail.com</option>
+            <option value="tutanota.com">tutanota.com</option>
+            <option value="runbox.com">runbox.com</option>
+            <option value="hushmail.com">hushmail.com</option>
+            <option value="lycos.com">lycos.com</option>
+            <option value="zohomail.com">zohomail.com</option>
+            <option value="inbox.com">inbox.com</option>
+        </select>
+
+        <input type="number" id="emailCount" value="10" min="1" max="50">
+        
+        <button id="scrapeBtn" class="btn-green" onclick="generateEmails()">Scrape Real Emails</button>
+        <div id="genStatus" class="status"></div>
+    </div>
+
+    <!-- Section 2: Assign Email -->
+    <div class="card">
+        <h2>2. Assign Email for Device</h2>
+        
+        <input type="text" id="deviceId" readonly>
+        <button class="btn-blue" onclick="getNewEmail()">Get New Email</button>
+        <div id="assignedEmailStatus" class="status"></div>
+        <button class="btn-gray" onclick="copyEmail()">Copy Email</button>
+    </div>
+</div>
+
+<script>
+    // Initialize Unique Device ID
+    function initDeviceId() {
+        let devId = localStorage.getItem('device_id');
+        if (!devId) {
+            devId = 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase() + '-' + Date.now();
+            localStorage.setItem('device_id', devId);
+        }
+        document.getElementById('deviceId').value = 'Device ID: ' + devId;
+    }
+    initDeviceId();
+
+    // Trigger Email Scraping Request
+    async function generateEmails() {
+        const count = document.getElementById('emailCount').value;
+        const domain = document.getElementById('domainSelect').value;
+        const statusDiv = document.getElementById('genStatus');
+        const scrapeBtn = document.getElementById('scrapeBtn');
+
+        scrapeBtn.disabled = true;
+        scrapeBtn.innerText = "Scraping...";
+        statusDiv.className = 'status';
+
+        try {
+            const res = await fetch('/api/generate-emails', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count, domain })
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                statusDiv.className = 'status success';
+                statusDiv.innerText = data.message;
+            } else {
+                statusDiv.className = 'status error';
+                statusDiv.innerText = data.error || 'Failed to scrape.';
+            }
+        } catch (e) {
+            statusDiv.className = 'status error';
+            statusDiv.innerText = 'Server connection error.';
+        } finally {
+            scrapeBtn.disabled = false;
+            scrapeBtn.innerText = "Scrape Real Emails";
+        }
+    }
+
+    // Get Assigned Email Matching Selected Domain
+    async function getNewEmail() {
+        const devIdFull = document.getElementById('deviceId').value;
+        const deviceId = devIdFull.replace('Device ID: ', '');
+        const domain = document.getElementById('domainSelect').value;
+        const statusDiv = document.getElementById('assignedEmailStatus');
+
+        try {
+            const res = await fetch('/api/get-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId, domain })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                statusDiv.className = 'status success';
+                statusDiv.innerText = 'Assigned Email: ' + data.email;
+            } else {
+                statusDiv.className = 'status error';
+                statusDiv.innerText = data.error || 'No matching email available.';
+            }
+        } catch (e) {
+            statusDiv.className = 'status error';
+            statusDiv.innerText = 'Server error occurred.';
+        }
+    }
+
+    // Copy Email to Clipboard
+    function copyEmail() {
+        const statusText = document.getElementById('assignedEmailStatus').innerText;
+        if (statusText.includes('Assigned Email: ')) {
+            const email = statusText.replace('Assigned Email: ', '').trim();
+            navigator.clipboard.writeText(email);
+            alert('Copied to clipboard: ' + email);
+        } else {
+            alert('No email assigned to copy.');
+        }
+    }
+</script>
+
+</body>
 </html>
